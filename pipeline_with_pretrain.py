@@ -62,7 +62,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
 
             l1_loss_size = l1_loss(size_prediction, sizemap_target)
             l1_loss_offset = l1_loss(offset_prediction, offset_target) 
-            total_loss = heatmap_loss + size_contribution * l1_loss_size.item() + offset_contribution * l1_loss_offset.item()
+            total_loss = heatmap_loss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
 
 
             #total_loss = heatmaploss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
@@ -95,9 +95,9 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target)
                 ##
                 peaks = extract_peaks_per_class(heatmap_prediction, 5) # in format [batch_nr[keypoints, sizes, offsets]].
-                print(peaks)
+                print("extract_peaks_per_class",len(peaks))
                 peaks = process_peaks_per_class_new(heatmap_prediction, heatmap_target, window_size=20/downsample_factor)
-                peaks 
+                print("process_peaks_per_class",len(peaks)) 
 
                 l1_loss_size = l1_loss(size_prediction, sizemap_target)
                 l1_loss_offset = l1_loss(offset_prediction, offset_target)            
@@ -119,9 +119,9 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
         print(f'Fold {fold}, Epoch {epoch}, Total Validation Loss: {validation_loss / len(validation_loader)}')
     torch.set_printoptions(profile="full")  
     #visualize_size_map(sizemap_target, size_prediction[len(size_prediction)-1])
-    visualize_heatmap(heatmap_target, heatmap_prediction)
-    visualize_size_map(sizemap_target, size_prediction)
-    visualize_offset_map(offset_target, offset_prediction)
+    #visualize_heatmap(heatmap_target, heatmap_prediction)
+    #visualize_size_map(sizemap_target, size_prediction)
+    #visualize_offset_map(offset_target, offset_prediction)
     torch.set_printoptions(profile="default") # reset
 
 writer.close()
