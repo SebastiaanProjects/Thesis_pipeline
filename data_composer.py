@@ -27,6 +27,7 @@ for csv_file in csv_files:
         if speed_column.isnull().any() == False:
             pre_train_tensors_list.append(torch.tensor(cluster.values, dtype=torch.float64))
 
+#random.shuffle(pre_train_tensors_list) #exluding biases by hussling the orders of the items. No bias per dataset
 #for pretraining, use this variable:
 pre_train_tensors_list
 
@@ -63,8 +64,6 @@ indexed_labels_list_train = prepare_targets(labels_list_train, labels_for_refren
 indexed_labels_list_test = prepare_targets(labels_list_test, labels_for_refrence)
 
 trainingset = TimeSeriesDataset(original_features_train, train_labels_indexed, durations_all_train,  keypoints_all_train, indexed_labels_list_train)
-
-
 testset = TimeSeriesDataset(original_features_test, test_labels_indexed, durations_all_test,  keypoints_all_test, indexed_labels_list_test)
 
 

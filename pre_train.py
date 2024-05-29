@@ -14,7 +14,7 @@ decoder = TimeSeriesMAEDecoder(embed_dim=4, decoder_embed_dim=64, num_heads=16, 
 total_loss = 0
 step = 0
 
-for epoch in range(5):
+for epoch in range(20):
     errors = []            
     for tensor_200hz in pre_train_tensors_list:
         masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.7)
@@ -57,7 +57,7 @@ for epoch in range(5):
     print(f"average loss:{epoch}", total_loss/step)
     #print(f"reconstruction_loss_list:{epoch} ", errors)
 
-#this created the 
+#this created the pretrained encoder for later use in the pipeline
 pretrained_encoder
 
 #now for comparison, the untrained encoder
