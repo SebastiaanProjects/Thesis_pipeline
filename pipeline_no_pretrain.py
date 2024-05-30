@@ -1,5 +1,5 @@
 from MAE_utils import TimeSeriesMAEEncoder, TimeSeriesMAEDecoder
-from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, extract_peaks_per_class, visualize_heatmap, visualize_size_map, visualize_offset_map, process_peaks_per_class_new
+from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, extract_peaks_per_class, visualize_heatmap, visualize_size_map, visualize_offset_map, evaluate_adaptive_peak_extraction
 from Data_extraction_utils import custom_collate_fn, TimeSeriesDataset
 
 from data_composer import trainingset, testset, labels_for_refrence, sequence_length#, pre_train_tensors_list, 
@@ -96,10 +96,17 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 #heatmaploss = w_focal_loss(heatmap_prediction, heatmap_target)
                 heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target)
                 ##
-                peaks = extract_peaks_per_class(heatmap_prediction, 5) # in format [batch_nr[keypoints, sizes, offsets]].
+                #peaks = extract_peaks_per_class(heatmap_prediction, 5) # in format [batch_nr[keypoints, sizes, offsets]].
+                #print(peaks)
+                #peaks = process_peaks_per_class_new(heatmap_prediction, heatmap_target, window_size=20/downsample_factor)
+                peaks = evaluate_adaptive_peak_extraction(heatmap_prediction, window_size= (40/downsample_factor), prominence_factor=0.75)
                 print(peaks)
-                peaks = process_peaks_per_class_new(heatmap_prediction, heatmap_target, window_size=20/downsample_factor)
-                peaks
+                print("batch item 0 peaks =", len(peaks[0]))
+                print("batch item 1 peaks =", len(peaks[1]))
+                print("batch item 2 peaks =", len(peaks[2]))
+                print("batch item 3 peaks =", len(peaks[3]))
+                print("batch item 4 peaks =", len(peaks[4]))
+                print("batch item 5 peaks =", len(peaks[5]))
                 
 
                 l1_loss_size = l1_loss(size_prediction, sizemap_target)
@@ -137,3 +144,4 @@ writer.close()
 # recall and precision and what not
 # the conversion from to original label then needs to work to but that is easy
 # the test can also be done then
+
