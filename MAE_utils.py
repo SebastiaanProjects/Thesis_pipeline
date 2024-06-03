@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-
 class TimeSeriesMAEEncoder(nn.Module):
     """
     A Transformer-based encoder for time series data. This encoder projects input

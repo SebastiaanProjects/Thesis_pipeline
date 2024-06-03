@@ -14,7 +14,7 @@ decoder = TimeSeriesMAEDecoder(embed_dim=4, decoder_embed_dim=64, num_heads=16, 
 total_loss = 0
 step = 0
 
-for epoch in range(20):
+for epoch in range(10):
     errors = []            
     for tensor_200hz in pre_train_tensors_list:
         masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.7)

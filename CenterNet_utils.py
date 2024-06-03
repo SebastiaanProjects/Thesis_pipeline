@@ -206,7 +206,7 @@ def generate_offset_map(batch_size, sequence_length, keypoints_batch, downsample
             offset_maps_batch[b, int(downsampled_keypoint)] = offset
     
     return torch.tensor(offset_maps_batch, dtype=torch.float32)
-
+#not necessary
 def extract_peaks_per_class(heatmap, K=5):
     """
     Extract peaks from the heatmap using top-k selection and NMS, separately for each class.
@@ -456,7 +456,7 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, beta=4,weight_tens
     loss = loss.mean()  #average over batch
 
     return loss    
-
+##new way at row 512
 def process_peaks_per_class_new(predicted_heatmap, real_heatmap, window_size=3):
     """
     Process peaks per class in the predicted heatmap and compare with the real heatmap.
@@ -509,10 +509,11 @@ def nms_1d(heatmap, window_size=9):
     return suppressed
 
 
-def non_maximum_suppression_1d(heatmap, window_size=3):
+def non_maximum_suppression_1d(heatmap, window_size=9):
     """
-    Apply non-maximum suppression to a 1D heatmap for each class.
-    
+    Apply non-maximum suppression to a 1D heatmap for each class, before other handeling has been done.
+    Allows for peaks to stick out in comparison to its nearest window_size neighbours
+
     Args:
     - heatmap (torch.Tensor): 2D tensor representing the heatmap with shape (num_classes, sequence_length).
     - window_size (int): The size of the window to apply NMS.
@@ -523,17 +524,17 @@ def non_maximum_suppression_1d(heatmap, window_size=3):
     num_classes, seq_length = heatmap.shape
     suppressed_heatmap = heatmap.clone()
 
-    for class_idx in range(num_classes):
-        class_heatmap = heatmap[class_idx]
+    for class_nr in range(num_classes):
+        class_heatmap = heatmap[class_nr]
         length = class_heatmap.size(0)
         
         for i in range(length):
-            start = max(0, i - window_size // 2)
-            end = min(length, i + window_size // 2 + 1)
-            local_max_index = torch.argmax(class_heatmap[int(start):int(end)]) + start
+            start = int(max(0, i - window_size // 2))
+            end = int(min(length, i + window_size // 2 + 1))
+            local_max_index = torch.argmax(class_heatmap[start:end]) + start
 
             if i != local_max_index.item():
-                suppressed_heatmap[class_idx, i] = 0
+                suppressed_heatmap[class_nr, i] = 0
     
     return suppressed_heatmap
 
@@ -547,16 +548,27 @@ def adaptive_peak_extraction(heatmap, window_size=9, prominence_factor=0.75):
     - prominence_factor (float): Factor to determine the adaptive threshold based on heatmap values.
 
     Returns:
-    - list of tuples: Each tuple contains (class_idx, position_idx, activation).
+    - list of tuples: Each tuple contains (class_nr, position_nr, activation).
     """
-
-    nms_heatmap = non_maximum_suppression_1d(heatmap, window_size)  
-    max_vals, _ = torch.max(nms_heatmap, dim=1, keepdim=True) # Calculate an adaptive threshold for each class
-    adaptive_thresholds = max_vals * prominence_factor   
-    peaks = (nms_heatmap > adaptive_thresholds).nonzero(as_tuple=False) # Extract peak indices from the adaptive threshold over nms mpa
-    peak_activations = nms_heatmap[peaks[:, 0], peaks[:, 1]] #retrieving activation values and position to later combine them with classes
+    # Apply non-maximum suppression
+    nms_heatmap = non_maximum_suppression_1d(heatmap, window_size)
+    
+    # Calculate an adaptive threshold for each class
+    max_vals, _ = torch.max(nms_heatmap, dim=1, keepdim=True)
+    adaptive_thresholds = max_vals * prominence_factor
+    
+    # Extract peak indices based on the adaptive threshold
+    peaks = (nms_heatmap > adaptive_thresholds).nonzero(as_tuple=False)
+    
+    # Extract the activation values
+    peak_activations = nms_heatmap[peaks[:, 0], peaks[:, 1]]
+    
+    # Combine class indices, position indices, and activation values
     extracted_peaks = [(peaks[i, 0].item(), peaks[i, 1].item(), peak_activations[i].item()) for i in range(peaks.size(0))]
     
+    #extra filtering handmade to include an extra neighbourclass and ratio comparison for activaiton
+    extracted_peaks = neighbouring_peaks_sort(extracted_peaks)
+
     return extracted_peaks
 
 def evaluate_adaptive_peak_extraction(predicted_heatmaps, window_size=9, prominence_factor=0.75):
@@ -570,89 +582,253 @@ def evaluate_adaptive_peak_extraction(predicted_heatmaps, window_size=9, promine
 
     Returns:
     - list of lists: Each list contains the selected peaks from one heatmap list(lists(tuples)). 
-        tuples of (class_idx, position_idx, activation) for each batch.
+        tuples of (class_nr, position_nr, activation) for each batch.
     """
     batch_size, num_classes, seq_length = predicted_heatmaps.shape
     extracted_peaks = []
 
-    for batch_idx in range(batch_size):
+    for batch_nr in range(batch_size):
         peaks_from_heatmap = []
-        heatmap = predicted_heatmaps[batch_idx]
+        heatmap = predicted_heatmaps[batch_nr]
         peaks = adaptive_peak_extraction(heatmap, window_size, prominence_factor)
-        peaks = neighbouring_peaks_sort(peaks)
         peaks_from_heatmap.append(peaks)
         extracted_peaks.append(peaks_from_heatmap)
     
+    #might become unnecessary now that neighbouring peaks in adaptive_peak_extraction
     extracted_peaks = [item[0] for item in extracted_peaks] #unpack
 
     return extracted_peaks
 
-def neighbouring_peaks_sort(extracted_peaks): #this excludes the batches, so need to look after that later
+def combine_peaks_with_maps(extracted_peaks, size_map, offset_map, downsampling_factor):
+    combined_peaks = []
+    for batchnr in range(len(extracted_peaks)): #without len()perhaps
+        size_map_batchnr = size_map[batchnr].squeeze(0)
+        offset_map_batchnr = offset_map[batchnr].squeeze(0)
+        batch_list = []
+        for peak in extracted_peaks[batchnr]:
+            class_nr, position, activation = peak
+            size = size_map_batchnr[position].item() * downsampling_factor  #remember the downsampling factor!
+            offset = offset_map_batchnr[position].item() * downsampling_factor
+            position = position * downsampling_factor
+            #adjusted_position = position + offset
+            batch_list.append((class_nr, position, activation, size, offset))
+        combined_peaks.append(batch_list)
+    return combined_peaks
+
+def neighbouring_peaks_sort(extracted_peaks):
+    """
+    Sort peaks by position and select the highest activation peaks, ensuring no two peaks of the same class are adjacent unless separated by another class.
+    
+    Args:
+    - extracted_peaks (list of tuples): Each tuple contains (class_index, position, activation).
+    
+    Returns:
+    - list of tuples: Chosen peaks with highest activations, ensuring no two adjacent peaks of the same class.
+    """
     sorted_peaks_by_position = sorted(extracted_peaks, key=lambda peak: peak[1])
     chosen_peaks = []
-    position_tracker = sorted_peaks_by_position[0][1] #starting position
+    position_tracker = sorted_peaks_by_position[0][1] # Starting position
     position_list_1 = []
-    position_list_2 = [] #the second list is to see if there is a next peak from the same class that is build without another peak in the between, highest peak wins
+    position_list_2 = [] # To track if there is a next peak from the same class without another peak in between, highest peak wins
+    
     for index, (class_index, position, activation) in enumerate(sorted_peaks_by_position):
-        #put all the peaks on the same position together, see which has the highest activation. if all activations from position i have been handled, posistion_list_1 has the highest activation from that position. 
+        # Put all the peaks on the same position together and see which has the highest activation
         if position_tracker == position:
-            if not position_list_1 : #check if list is empty
-                position_list_1.append((class_index, position, activation)) # necessary for basecase
-            else: #if position_list_1 not empty compare activations
-                if activation > position_list_1[0][2]: #if current activation is higher than only activation in list, choose highest activation
+            if not position_list_1: # Check if list is empty
+                position_list_1.append((class_index, position, activation)) # Necessary for base case
+            else: # If position_list_1 is not empty, compare activations
+                if activation > position_list_1[0][2]: # If current activation is higher than the only activation in the list, choose highest activation
                     position_list_1[0] = (class_index, position, activation)
-        else: #position is higher than position tracker, so position_list1 now has the highest activation for that position, compare with last peak to see if they are of the same class
-            if not position_list_2: #basecase
+        else: # Position is higher than position_tracker, so position_list1 now has the highest activation for that position, compare with the last peak to see if they are of the same class
+            if not position_list_2: # Base case
                 position_list_2 = position_list_1            
                 position_list_1 = []
                 position_list_1.append((class_index, position, activation))
-            else: #compare if the two positions have the same activation class, if so take the highest activation value, if there is another peak in the middle, don't bother
-                if position_list_1[0][0] == position_list_2[0][0]: #if position_list_2's class is the same as position_list 1'sequence_length
-                    if position_list_1[0][2] > position_list_2[0][2]: #see which acivation is higher, highest acivation is added to chosen peaks
+            else: # Compare if the two positions have the same activation class
+                if position_list_1[0][0] == position_list_2[0][0]: # If position_list_2's class is the same as position_list_1's class
+                    if position_list_1[0][2] > position_list_2[0][2]: # See which activation is higher, highest activation is added to chosen peaks
                         position_list_2 = position_list_1
-                        position_list_1=[]
-                        position_list_1.append((class_index, position, activation)) #fill with the newest activation. the comparison was for position i-2 and position i-1 so now position i must be filled in
+                        position_list_1 = []
+                        position_list_1.append((class_index, position, activation)) # Fill with the newest activation
                         chosen_peaks.append(position_list_2[0])
                     else:
-                        position_list_1=[]
+                        position_list_1 = []
                         position_list_1.append((class_index, position, activation))
                         chosen_peaks.append(position_list_2[0])
-
-                if position_list_1[0][0] != position_list_2[0][0]: #if they are not the same class then the peak of position_list_2 is justified (not same classes after eachoter and highest activation)
-                    #PERHAPS ADD A THRESHOLD HERE, IF POSITION_LIST_1[0][2] < POSITION_LIST_2[0][2] * 0.5: POSITION_LIST_1 = [], SUCH THAT ONLY HIGH PEAKS ARE USED
+                else: # If they are not the same class, the peak of position_list_2 is justified (not the same classes consecutively and highest activation)
                     max_activation_local = max(position_list_1[0][2], position_list_2[0][2])
-                    if position_list_1[0][2] < max_activation_local / 3: #checking outcomes showed that activations four times smaller than predessecor often are unintended peaks
-                        position_list_1 = []
-                        position_list_1.append((class_index, position, activation))
-                    if position_list_2[0][2] < max_activation_local / 3:
-                        position_list_2 = position_list_1 #now the next activations can be compared
+                    if position_list_1[0][2] < max_activation_local / 3: # If current activation is significantly lower, discard it
                         position_list_1 = []
                         position_list_1.append((class_index, position, activation))
                     else:
                         chosen_peaks.append(position_list_2[0])
-                        position_list_2 = position_list_1 #now the next activations can be compared
+                        position_list_2 = position_list_1 # Now the next activations can be compared
                         position_list_1 = []
                         position_list_1.append((class_index, position, activation))
             
         position_tracker = position
 
-    #termination_case
-    if position_list_1[0][0] == position_list_2[0][0]: #if position_list_2's class is the same as position_list 1'sequence_length
-        if position_list_1[0][2] > position_list_2[0][2]: #see which acivation is higher, highest acivation is added to chosen peaks
-            position_list_2 = position_list_1 #fill with the newest activation. the comparison was for position i-2 and position i-1 so now position i must be filled in
+    # Termination case
+    if not position_list_2: #if position_list_2 is empty  
+        chosen_peaks.append(position_list_1[0])
+    elif not position_list_1: #if position_list_1 is empty, if not both are full
+        chosen_peaks.append(position_list_2[0])
+    elif position_list_1[0][0] == position_list_2[0][0]: # If position_list_2's class is the same as position_list_1's class
+        if position_list_1[0][2] > position_list_2[0][2]: # See which activation is higher, highest activation is added to chosen peaks
+            position_list_2 = position_list_1 # Fill with the newest activation
             chosen_peaks.append(position_list_2[0])
         else:
             chosen_peaks.append(position_list_2[0])
-    else: #not same class, so append both
+    else: # Not the same class, so append both
         max_activation_local = max(position_list_1[0][2], position_list_2[0][2])
-        if position_list_1[0][2] < max_activation_local / 3: #checking outcomes showed that activations four times smaller than predessecor often are unintended peaks
+        if position_list_1[0][2] < max_activation_local / 3: # If current activation is significantly lower, discard it
             chosen_peaks.append(position_list_2[0])
-        if position_list_2[0][2] < max_activation_local / 3:
+        else:
+            chosen_peaks.append(position_list_2[0])
             chosen_peaks.append(position_list_1[0])
-        else: 
-            chosen_peaks.append(position_list_2[0])
-            chosen_peaks.append(position_list_1[0])     
     
     return chosen_peaks
+
+def iou_based_peak_suppression(peaks, iou_threshold=0.5):
+    """
+    Performs NMS on 1D peaks based on Intersection over Union (IoU).
+    
+    Args:
+    - peaks list of (list of tuples): Each tuple contains (class_index, position, activation, size, offset).
+    - iou_threshold (float): IoU threshold for suppression.
+    
+    Returns:
+    - list of tuples: Filtered peaks after applying NMS.
+    """
+    batch_filtered_peaks = []
+    for batchnr in range(len(peaks)):
+        ranges = [(pos + offset - size / 2, pos + offset + size / 2) for _, pos, _, size, offset in peaks[batchnr]]
+        indices = np.argsort([activation for _, _, activation, _, _ in peaks[batchnr]])[::-1] #
+        
+        keep = []
+        while len(indices) > 0:
+            current = indices[0]
+            keep.append(current)
+            current_range = ranges[current]
+            indices = indices[1:] 
+            
+            remaining_indices = []
+            for index in indices:
+                if iou_1d(current_range, ranges[index]) < iou_threshold:
+                    remaining_indices.append(index)
+            indices = remaining_indices
+
+        filtered_peaks = [peaks[batchnr][i] for i in keep]
+        batch_filtered_peaks.append(filtered_peaks)
+    return batch_filtered_peaks
+
+def iou_1d(range1, range2):
+    """
+    Compute the Intersection over Union (IoU) of two 1D ranges.
+    
+    Parameters:
+    - range1, range2: Tuples (start, end) representing the 1D ranges.
+    
+    Returns:
+    - IoU value
+    """
+    start1, end1 = range1
+    start2, end2 = range2
+    
+    # creating the interseciton
+    inter_start = max(start1, start2)
+    inter_end = min(end1, end2)
+    intersection = max(0, inter_end - inter_start)
+    
+    # creating the union
+    union = (end1 - start1) + (end2 - start2) - intersection
+    
+    return intersection / union
+
+def reconstruct_timelines(peaks, original_length):
+    """
+    Reconstruct the timeline with labels, ensuring no position is left unlabeled.
+    
+    Args:
+    - peaks list of (list of tuples): Each tuple contains (class_index, position, activation, size, offset).
+    - original_length (int): Original length of the time series.
+    
+    Returns:
+    - torch.Tensor: Reconstructed timeline with labels.
+    """
+    timelines=[]
+    for batch_nr in range(len(peaks)): #w/o len
+        timeline = torch.zeros(original_length, dtype=int)
+        for class_idx, pos, activation, size, offset in peaks[batch_nr]:
+            start = int(pos + offset - size / 2)
+            end = int(pos + offset + size / 2)
+            start = max(0, start)
+            end = min(original_length, end)
+            timeline[start:end] = class_idx # + 1  # Using class_idx + 1 to differentiate from the default zero label
+        timelines.append(timeline)
+    
+    combined_timelines = torch.stack(timelines, dim=0)
+    return combined_timelines
+
+def plot_peaks(heatmap, size_map, offset_map, extracted_peaks, title):
+    """
+    Plot heatmap, size map, offset map, and extracted peaks for visualization.
+    
+    Args:
+    - heatmap (torch.Tensor): Heatmap with shape (num_classes, sequence_length).
+    - size_map (torch.Tensor): Size map with shape (1, sequence_length).
+    - offset_map (torch.Tensor): Offset map with shape (1, sequence_length).
+    - extracted_peaks (list of tuples): Each tuple contains (class_index, position, activation, size, offset).
+    - title (str): Title for the plot.
+    """
+    num_classes, seq_length = heatmap.shape
+    fig, axs = plt.subplots(num_classes, 1, figsize=(10, num_classes * 2), sharex=True)
+    
+    if num_classes == 1:
+        axs = [axs]
+    
+    x = np.arange(seq_length)
+    
+    for class_idx in range(num_classes):
+        axs[class_idx].plot(x, heatmap[class_idx].numpy(), label='Heatmap', color='blue')
+        axs[class_idx].plot(x, size_map[0].numpy(), label='Size Map', color='green', linestyle='dashed')
+        axs[class_idx].plot(x, offset_map[0].numpy(), label='Offset Map', color='red', linestyle='dotted')
+        
+        class_peaks = [peak for peak in extracted_peaks if peak[0] == class_idx]
+        peak_positions = [peak[1] for peak in class_peaks]
+        peak_activations = [peak[3] for peak in class_peaks]
+        
+        axs[class_idx].scatter(peak_positions, peak_activations, color='orange', label='Peaks')
+        
+        for peak in class_peaks:
+            pos = int(peak[1])
+            size = peak[2]
+            offset = offset_map[0, pos].item()
+            rect_start = pos - size / 2 + offset
+            rect_end = pos + size
+
+def illegal_smooth_timeline(timeline, min_length=3):
+    """
+    Smooth the timeline by merging short segments.
+    
+    Args:
+    - timeline (torch.Tensor): Tensor representing the timeline with class labels.
+    - min_length (int): Minimum length of a segment to be preserved.
+    
+    Returns:
+    - torch.Tensor: Smoothed timeline.
+    """
+    smoothed_timeline = timeline.clone()
+    current_label = smoothed_timeline[0]
+    start_idx = 0
+    
+    for i in range(1, len(smoothed_timeline)):
+        if smoothed_timeline[i] != current_label:
+            if (i - start_idx) < min_length:
+                smoothed_timeline[start_idx:i] = smoothed_timeline[start_idx - 1]
+            current_label = smoothed_timeline[i]
+            start_idx = i
+    
+    return smoothed_timeline
 
 

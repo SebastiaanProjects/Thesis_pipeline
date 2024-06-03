@@ -1,5 +1,5 @@
 from MAE_utils import TimeSeriesMAEEncoder, TimeSeriesMAEDecoder
-from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, extract_peaks_per_class, visualize_heatmap, visualize_size_map, visualize_offset_map, evaluate_adaptive_peak_extraction
+from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, visualize_heatmap, visualize_size_map, visualize_offset_map, evaluate_adaptive_peak_extraction, neighbouring_peaks_sort, iou_based_peak_suppression, iou_1d, reconstruct_timelines, combine_peaks_with_maps
 from Data_extraction_utils import custom_collate_fn, TimeSeriesDataset
 
 from data_composer import trainingset, testset, labels_for_refrence, sequence_length#, pre_train_tensors_list, 
@@ -13,6 +13,10 @@ from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard import SummaryWriter 
 import seaborn as sns
 import numpy as np
+import torch.nn.functional as F
+import torch
+from torcheval.metrics import MulticlassAccuracy, MulticlassRecall
+
 sns.set()
 writer = SummaryWriter()
 
@@ -32,6 +36,7 @@ optimizer = optim.Adam(list(model.parameters()), lr=0.001,weight_decay=1e-5)
 kfold = KFold(n_splits=num_folds, shuffle=True, random_state=1)
 
 
+
 for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainingset already stratified
     train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids) #splits into traindata
     test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids) #splits into testdata
@@ -44,6 +49,8 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
     for epoch in range(5):         
         
         model.train()
+        total_predictions = []
+        total_labels = []
         for features, labels , durations, keypoints, labels_list in train_loader:
             optimizer.zero_grad()
             heatmap_target = generate_heatmaps(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=unique_labels_len, durations_batch= durations, downsample_factor=4)
@@ -55,22 +62,41 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             size_prediction = size_prediction.squeeze(1)
             offset_prediction = offset_prediction.squeeze(1)
 
-            #########
-            #w_focal_loss = WeightedFocalLoss()#focal_loss_weight_tensor(labelled['b.int']))
-            #heatmap_loss = w_focal_loss(heatmap_prediction, heatmap_target)
             heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target) #manual instantation of focalloss
-            ############
 
 
             l1_loss_size = l1_loss(size_prediction, sizemap_target)
             l1_loss_offset = l1_loss(offset_prediction, offset_target) 
             total_loss = heatmap_loss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
 
-
-            #total_loss = heatmaploss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
             total_loss.backward()
-            optimizer.step()
+            if epoch == 4:
+                peaks = evaluate_adaptive_peak_extraction(heatmap_prediction, window_size= (40/downsample_factor), prominence_factor=0.75)               
+                combined_peaks = combine_peaks_with_maps(peaks, size_prediction, offset_prediction, downsample_factor)
+                filtered_peaks = iou_based_peak_suppression(combined_peaks, iou_threshold=0.3)
+                reconstructed_timelines = reconstruct_timelines(filtered_peaks, sequence_length)
+                total_predictions.append(reconstructed_timelines)
+                total_labels.append(labels)          
+                total_predictions_tensor = torch.stack(total_predictions, dim=0).flatten()
+                total_labels_tensor = torch.stack(total_labels, dim=0).flatten()
+                accuracy_per_class = MulticlassAccuracy(average=None, num_classes=num_classes)
+                average_accuracy = MulticlassAccuracy()
+                recall_per_class = MulticlassRecall(average=None, num_classes=num_classes)
+                average_recall = MulticlassRecall()
 
+                accuracy_per_class.update(total_predictions_tensor, total_labels_tensor)
+                average_accuracy.update(total_predictions_tensor, total_labels_tensor)
+                recall_per_class.update(total_predictions_tensor, total_labels_tensor)
+                average_recall.update(total_predictions_tensor, total_labels_tensor)
+                print("accuracy per class:", accuracy_per_class.compute())
+                print("recall per class:", recall_per_class.compute())
+
+                writer.add_scalar('Training/ average precision', average_accuracy.compute(), fold)
+                writer.add_scalar('Training/ average recall', average_recall.compute(), fold)
+
+
+            optimizer.step()
+            
             writer.add_scalar('Training/size_loss', l1_loss_size.item(), epoch * len(train_loader) + fold)
             writer.add_scalar('Training/heatmap_loss', heatmap_loss.item(), epoch * len(train_loader) + fold)
             writer.add_scalar('Training/offset_loss', l1_loss_offset.item(), epoch * len(train_loader) + fold)          
@@ -80,7 +106,8 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
         model.eval()
         with torch.no_grad():
             validation_loss, heatmaploss_tot, l1_loss_offset_tot, l1_loss_size_tot = 0,0,0,0
-
+            total_predictions = []
+            total_labels= [] ####make a tensor with all the labels and one with all the predictions then try average recall and precision
             for features, labels , durations, keypoints, labels_list in validation_loader:
                 heatmap_target = generate_heatmaps(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=unique_labels_len, durations_batch= durations, downsample_factor=4)
                 sizemap_target = generate_size_maps(sequence_length=len(labels[0]) ,batch_size=train_loader.batch_size, keypoints_batch=keypoints, durations_batch= durations, downsample_factor=4)
@@ -91,33 +118,69 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 heatmap_prediction, size_prediction, offset_prediction = output
                 size_prediction = size_prediction.squeeze(1)
                 offset_prediction = offset_prediction.squeeze(1) 
-                ###
-                #w_focal_loss = WeightedFocalLoss()
-                #heatmaploss = w_focal_loss(heatmap_prediction, heatmap_target)
-                heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target)
-                ##
-                #peaks = extract_peaks_per_class(heatmap_prediction, 5) # in format [batch_nr[keypoints, sizes, offsets]].
-                #print(peaks)
-                #peaks = process_peaks_per_class_new(heatmap_prediction, heatmap_target, window_size=20/downsample_factor)
+                heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target)                
+
                 peaks = evaluate_adaptive_peak_extraction(heatmap_prediction, window_size= (40/downsample_factor), prominence_factor=0.75)
-                print(peaks)
-                print("batch item 0 peaks =", len(peaks[0]))
-                print("batch item 1 peaks =", len(peaks[1]))
-                print("batch item 2 peaks =", len(peaks[2]))
-                print("batch item 3 peaks =", len(peaks[3]))
-                print("batch item 4 peaks =", len(peaks[4]))
-                print("batch item 5 peaks =", len(peaks[5]))
-                
+                                
+                combined_peaks = combine_peaks_with_maps(peaks, size_prediction, offset_prediction, downsample_factor)
+                filtered_peaks = iou_based_peak_suppression(combined_peaks, iou_threshold=0.3)
+
+                # (class_nr, position, activation, size, offset)
+                if epoch == 4:
+                    print("batch item 0 peaks =", len(filtered_peaks[0]))
+                    print("batch item 1 peaks =", len(filtered_peaks[1])) #2 is quite low if constistent, but possible
+                    print("batch item 2 peaks =", len(filtered_peaks[2]))
+                    print("batch item 3 peaks =", len(filtered_peaks[3]))
+                    print("batch item 4 peaks =", len(filtered_peaks[4]))
+                    print("batch item 5 peaks =", len(filtered_peaks[5]))
+                    total_predictions.append(reconstruct_timelines(filtered_peaks, sequence_length))
+                    total_labels.append(labels)
+                    total_predictions_tensor = torch.stack(total_predictions, dim=0).flatten()
+                    total_labels_tensor = torch.stack(total_labels, dim=0).flatten()
+                    accuracy_per_class = MulticlassAccuracy(average=None, num_classes=num_classes)
+                    average_accuracy = MulticlassAccuracy()
+                    recall_per_class = MulticlassRecall(average=None, num_classes=num_classes)
+                    average_recall = MulticlassRecall()
+
+                    accuracy_per_class.update(total_predictions_tensor, total_labels_tensor)
+                    average_accuracy.update(total_predictions_tensor, total_labels_tensor)
+                    recall_per_class.update(total_predictions_tensor, total_labels_tensor)
+                    average_recall.update(total_predictions_tensor, total_labels_tensor)
+                    print("accuracy per class:", accuracy_per_class.compute())
+                    print("recall per class:", recall_per_class.compute())
+                    
+                    writer.add_scalar('Validation/average precision', average_accuracy.compute(), fold)
+                    writer.add_scalar('Validation/average recall', average_recall.compute(), fold)
+
+                if fold > 10:
+                    torch.set_printoptions(profile="full")
+                    print("combined peaks[0]", combined_peaks[0])  
+                    print("filtered peaks[0]", filtered_peaks[0])
+                    print("reconstructed_timelines[0]",reconstructed_timelines[0])
+                    print("labels[0]", labels[0])                   
+
+                    torch.set_printoptions(profile="default") # reset               
 
                 l1_loss_size = l1_loss(size_prediction, sizemap_target)
                 l1_loss_offset = l1_loss(offset_prediction, offset_target)            
                 total_loss = heatmaploss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
 
+                def correlation_coefficient(tensor_a, tensor_b):
+                    a_mean = tensor_a - tensor_a.mean(dim=1, keepdim=True)
+                    b_mean = tensor_b - tensor_b.mean(dim=1, keepdim=True)
+                    numerator = (a_mean * b_mean).sum(dim=1)
+                    denominator = torch.sqrt((a_mean ** 2).sum(dim=1) * (b_mean ** 2).sum(dim=1))
+                    return numerator / denominator
+
+
+                #correlation = correlation_coefficient(labels, reconstructed_timelines)
+
                 heatmaploss_tot+= heatmaploss
                 validation_loss+= total_loss
                 l1_loss_size_tot += l1_loss_size
                 l1_loss_offset_tot+= l1_loss_offset
-
+                
+                #writer.add_scalar('validationcosine_similarity', cosine_similarity,epoch * len(validation_loader) + fold )
                 writer.add_scalar('Validation/size_loss', l1_loss_size, epoch * len(validation_loader) + fold)
                 writer.add_scalar('Validation/heatmap_loss', heatmaploss, epoch * len(validation_loader) + fold)
                 writer.add_scalar('Validation/offset_loss', l1_loss_offset, epoch * len(train_loader) + fold)          
@@ -127,13 +190,27 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
         print(f'Fold {fold}, Epoch {epoch}, Heatmap Loss: {heatmaploss_tot / len(validation_loader)}')
         print(f'Fold {fold}, Epoch {epoch}, offset Loss: {l1_loss_offset_tot / len(validation_loader)}')
         print(f'Fold {fold}, Epoch {epoch}, Total Validation Loss: {validation_loss / len(validation_loader)}')
-    torch.set_printoptions(profile="full")  
-    #visualize_size_map(sizemap_target, size_prediction[len(size_prediction)-1])
-    visualize_heatmap(heatmap_target, heatmap_prediction)
-    visualize_size_map(sizemap_target, size_prediction)
-    visualize_offset_map(offset_target, offset_prediction)
-    torch.set_printoptions(profile="default") # reset
 
+    torch.set_printoptions(profile="full")  
+    #visualize_heatmap(heatmap_target, heatmap_prediction)
+    #visualize_size_map(sizemap_target, size_prediction)
+    #visualize_offset_map(offset_target, offset_prediction)
+    torch.set_printoptions(profile="default") # reset 
+    #AFTER FOLD 14:
+    #Traceback (most recent call last):
+    #File "/home/sebastiman/ProjectenFolder/Thesis_pipeline/pipeline_no_pretrain.py", line 96, in <module>
+    #peaks = evaluate_adaptive_peak_extraction(heatmap_prediction, window_size= (40/downsample_factor), prominence_factor=0.75)
+    #        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    #File "/home/sebastiman/ProjectenFolder/Thesis_pipeline/CenterNet_utils.py", line 593, in evaluate_adaptive_peak_extraction
+    #peaks = adaptive_peak_extraction(heatmap, window_size, prominence_factor)
+    #        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    #File "/home/sebastiman/ProjectenFolder/Thesis_pipeline/CenterNet_utils.py", line 570, in adaptive_peak_extraction
+    #extracted_peaks = neighbouring_peaks_sort(extracted_peaks)
+    #                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    #File "/home/sebastiman/ProjectenFolder/Thesis_pipeline/CenterNet_utils.py", line 671, in neighbouring_peaks_sort
+    #if position_list_1[0][0] == position_list_2[0][0]: # If position_list_2's class is the same as position_list_1's class
+    #                            ~~~~~~~~~~~~~~~^^^
+    #IndexError: list index out of range
 writer.close()
 
 
