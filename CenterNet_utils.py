@@ -7,6 +7,7 @@ import torch.nn.init as init
 import pandas as pd
 import torch.nn as nn
 from data_composer import labels_for_refrence, sequence_length, num_classes
+from sklearn.metrics import confusion_matrix
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -938,4 +939,43 @@ def reconstruct_timelines_start_max_activation(peaks, original_length):
     return combined_timelines
 
 
+def plot_confusion_matrix(y_true, y_pred, title):
+    cm = confusion_matrix(y_true, y_pred, normalize='true')
+    fig, ax = plt.subplots(figsize=(10, 8))  # Increase figure size
+    sns.heatmap(cm, annot=True, fmt='.2f', cmap='Blues', ax=ax, annot_kws={"size": 10})  # Reduce font size
+    ax.set_xlabel('Predicted label')
+    ax.set_ylabel('True label')
+    ax.set_title(title)
+    plt.tight_layout()
+    return fig
 
+
+def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes):
+    """
+    Plots a bar chart for the given metric and logs it to TensorBoard.
+
+    Args:
+    - values_dict (dict): Dictionary with method names as keys and arrays of values as values.
+    - metric_name (str): The name of the metric being plotted (e.g., 'Precision', 'Recall', 'F1-Score').
+    - writer (SummaryWriter): TensorBoard SummaryWriter object.
+    - global_step (int): The global step value to log the figure at.
+    """
+    classes = np.arange(num_classes)
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    for i, (method, values) in enumerate(values_dict.items()):
+        ax.bar(classes + i * width, values, width, label=method)
+
+    ax.set_xlabel('Classes')
+    ax.set_ylabel(metric_name)
+    ax.set_title(f'{metric_name} by Class')
+    ax.legend()
+    ax.set_xticks(classes + width / 2)
+    ax.set_xticklabels(classes)
+
+    plt.tight_layout()
+
+    # Log the figure to TensorBoard
+    writer.add_figure(f'{metric_name} by Class', fig, global_step)
