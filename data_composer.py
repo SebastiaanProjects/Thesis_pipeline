@@ -1,10 +1,11 @@
-from Data_extraction_utils import prepare_targets ,custom_collate_fn, partition_and_mask, TimeSeriesDataset, ensure_label_representation, prepare_behaviour_data_duration
+from Data_extraction_utils import prepare_targets ,custom_collate_fn, partition_and_mask, TimeSeriesDataset, ensure_label_representation, prepare_behaviour_data_duration, most_logical_fold
 import pandas as pd
 import numpy as np
 import torch
 import glob
 import os
 from torch.utils.data import Dataset, DataLoader
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #loading the unlabelled data for preatraining the MAE sequence
 
@@ -25,7 +26,7 @@ for csv_file in csv_files:
         speed_column = cluster.iloc[:,3] #check if the speed values are present otherwise remove this measurement
         #print(speed_column)
         if speed_column.isnull().any() == False:
-            pre_train_tensors_list.append(torch.tensor(cluster.values, dtype=torch.float64))
+            pre_train_tensors_list.append(torch.tensor(cluster.values, dtype=torch.float64))#, device=device))
 
 #random.shuffle(pre_train_tensors_list) #exluding biases by hussling the orders of the items. No bias per dataset
 #for pretraining, use this variable:
@@ -48,9 +49,10 @@ for cluster in clusters:
     train_labels_list.append(cluster['b.int'].values.astype(int).tolist()) 
 
 
-train_datapoints, train_labels, test_datapoints, test_labels = ensure_label_representation(train_values_list, train_labels_list) #Stratification
+train_datapoints, train_labels, test_datapoints, test_labels = ensure_label_representation(train_values_list, train_labels_list,max_test_size=0.185) #Stratification, max_test_size = 0.185 so trainingset = 500 (for clear folds and batchsizes) and the testset will contain all classes
 
 labels_for_refrence = labelled['b.int']
+
 
 
 
@@ -63,7 +65,21 @@ test_labels_indexed = prepare_targets(original_labelling_test, labels_for_refren
 indexed_labels_list_train = prepare_targets(labels_list_train, labels_for_refrence)
 indexed_labels_list_test = prepare_targets(labels_list_test, labels_for_refrence)
 
+
+#trainingset is now 500 sequences. 
+#by division the most logical kfold will be 10 folds of size 500.
+#this leaves 113 for the testset, allowing for stratification to occur in a strict fashion
+
+train_data_size = len(train_labels_indexed)
+num_folds = int(most_logical_fold(train_data_size))
+fold_size = train_data_size / num_folds
+batches_within_fold = most_logical_fold(fold_size) 
+batch_size = int(fold_size / batches_within_fold)
+
+num_classes = len(labels_for_refrence.unique())
+
 trainingset = TimeSeriesDataset(original_features_train, train_labels_indexed, durations_all_train,  keypoints_all_train, indexed_labels_list_train)
 testset = TimeSeriesDataset(original_features_test, test_labels_indexed, durations_all_test,  keypoints_all_test, indexed_labels_list_test)
+
 
 

@@ -1,8 +1,8 @@
 from MAE_utils import TimeSeriesMAEEncoder, TimeSeriesMAEDecoder
-from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, extract_peaks_per_class, visualize_heatmap, visualize_size_map, visualize_offset_map, process_peaks_per_class_new, evaluate_adaptive_peak_extraction
+from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_offset_map, generate_size_maps, manual_loss_v2, l1_loss, extract_peaks_per_class, visualize_heatmap, visualize_size_map, visualize_offset_map, process_peaks_per_class_new, evaluate_adaptive_peak_extraction, combine_peaks_with_maps, iou_based_peak_suppression, reconstruct_timelines_ascending_activation
 from Data_extraction_utils import custom_collate_fn, TimeSeriesDataset
 from pre_train import pretrained_encoder
-from data_composer import trainingset, testset, labels_for_refrence, sequence_length#, pre_train_tensors_list, 
+from data_composer import trainingset, testset, labels_for_refrence, sequence_length, num_classes, num_folds, train_data_size #, pre_train_tensors_list, 
 
 import torch
 from torch.utils.data import DataLoader
@@ -13,30 +13,30 @@ from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard import SummaryWriter 
 import seaborn as sns
 import numpy as np
+from torcheval.metrics import MulticlassAccuracy, MulticlassRecall
+from sklearn.metrics import precision_score
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 sns.set()
 writer = SummaryWriter()
 
 
 #trainingset = TimeSeriesDataset(original_features_train, train_labels_indexed, durations_all_train,  keypoints_all_train, indexed_labels_list_train)
-trainingset
-num_folds = 17
 unique_labels_len = len(np.unique(labels_for_refrence))
 size_contribution, offset_contribution, downsample_factor = 0.2, 1, 4
 
-num_classes = len(labels_for_refrence.unique()) # == 15
 model = TimeSeriesCenterNet(pretrained_encoder, num_classes=num_classes,downsampling_factor=downsample_factor, sequence_length=sequence_length) #unspecified, out of sight, interaction and shit are removed (shake too)
 optimizer = optim.Adam(list(model.parameters()), lr=0.001,weight_decay=1e-5)
 
 kfold = KFold(n_splits=num_folds, shuffle=True, random_state=1)
-
+batch_size = train_data_size/num_folds
 
 for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainingset already stratified
     train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids) #splits into traindata
     test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids) #splits into testdata
 
     # Create DataLoaders for train and validation
-    train_loader = DataLoader(trainingset, batch_size=6, sampler=train_subsampler, collate_fn=custom_collate_fn)
-    validation_loader = DataLoader(trainingset, batch_size=6, sampler=test_subsampler, collate_fn=custom_collate_fn)
+    train_loader = DataLoader(trainingset, batch_size=batch_size, sampler=train_subsampler, collate_fn=custom_collate_fn)#, pin_memory=True) #pin_memory=True doesn't work if the oringal input is already stored in device
+    validation_loader = DataLoader(trainingset, batch_size=batch_size, sampler=test_subsampler, collate_fn=custom_collate_fn)#, pin_memory=True)
     print("length of train_loader",len(train_loader))
     print("length of validation_loader", len(validation_loader))
     for epoch in range(5):         
@@ -49,7 +49,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             heatmap_target = generate_heatmaps(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=unique_labels_len, durations_batch= durations, downsample_factor=4)
             sizemap_target = generate_size_maps(sequence_length=len(labels[0]) ,batch_size=train_loader.batch_size, keypoints_batch=keypoints, durations_batch= durations, downsample_factor=4)
             offset_target = generate_offset_map(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch=keypoints, downsample_factor=4)
-            mask = torch.ones(features.size(), dtype=torch.bool)
+            mask = torch.ones(features.size(), dtype=torch.bool)#, device=device)
             output = model(features,mask,downsample_factor) #adding mask to match the encoder architecture
             heatmap_prediction, size_prediction, offset_prediction = output 
             size_prediction = size_prediction.squeeze(1)
@@ -105,7 +105,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 heatmap_target = generate_heatmaps(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=unique_labels_len, durations_batch= durations, downsample_factor=4)
                 sizemap_target = generate_size_maps(sequence_length=len(labels[0]) ,batch_size=train_loader.batch_size, keypoints_batch=keypoints, durations_batch= durations, downsample_factor=4)
                 offset_target = generate_offset_map(sequence_length=len(labels[0]), batch_size=train_loader.batch_size, keypoints_batch=keypoints, downsample_factor=4)
-                mask = torch.ones(features.size(), dtype=torch.bool)
+                mask = torch.ones(features.size(), dtype=torch.bool)#, device=device)
                 output = model(features,mask, downsample_factor) #adding mask to match the encoder architecture
                 
                 heatmap_prediction, size_prediction, offset_prediction = output
@@ -126,7 +126,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                     print("batch item 3 peaks =", len(filtered_peaks[3]))
                     print("batch item 4 peaks =", len(filtered_peaks[4]))
                     print("batch item 5 peaks =", len(filtered_peaks[5]))
-                    total_predictions.append(reconstruct_timelines(filtered_peaks, sequence_length))
+                    total_predictions.append(reconstruct_timelines_ascending_activation(filtered_peaks, sequence_length))
                     total_labels.append(labels)
                     total_predictions_tensor = torch.stack(total_predictions, dim=0).flatten()
                     total_labels_tensor = torch.stack(total_labels, dim=0).flatten()

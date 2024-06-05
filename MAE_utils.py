@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class TimeSeriesMAEEncoder(nn.Module):
@@ -46,16 +47,16 @@ class TimeSeriesMAEEncoder(nn.Module):
         self.segment_dim = segment_dim # Dimension of each time-series segment
         self.embed_dim = embed_dim  # Dimension of the embedding space
         
-        self.linear_proj = nn.Linear(segment_dim, embed_dim) #in a linear way changes the 4value segment dimension into the chosen embedded dimension increasing complexity of the data
-        self.positional_embeddings = nn.Parameter(torch.randn(1, 200, embed_dim)) #creating positional embedding as a training parameter for the nerual network which is important for the effectiveness of the transformer model in processing sequences where the order of elements is important
+        self.linear_proj = nn.Linear(segment_dim, embed_dim)#.to(device) #in a linear way changes the 4value segment dimension into the chosen embedded dimension increasing complexity of the data
+        self.positional_embeddings = nn.Parameter(torch.randn(1, 200, embed_dim))#.to(device) #creating positional embedding as a training parameter for the nerual network which is important for the effectiveness of the transformer model in processing sequences where the order of elements is important
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dropout=dropout_rate,batch_first=True) #initializing the encoder
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dropout=dropout_rate,batch_first=True)#.to(device) #initializing the encoder
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)#.to(device)
 
     def forward(self, x, mask): #the mask is only given such that the decoder can work with the mask straight away
         # x is the input segments of shape [batch_size, seq_len, segment_dim]
         x = x.float()  # Make sure input data is float
-        
+        #x = x.to(device)
         x_projected = self.linear_proj(x) #apply the earlier created lineair_projection
 
         # Create positional embeddings for each data point in the batch
@@ -102,16 +103,16 @@ class TimeSeriesMAEDecoder(nn.Module):
         
         # Initialize learnable mask tokens and positional embeddings
         # Mask tokens should be a 3D tensor: 1 x 1 x decoder_embed_dim
-        self.mask_tokens = nn.Parameter(torch.randn(1, 1, decoder_embed_dim))
+        self.mask_tokens = nn.Parameter(torch.randn(1, 1, decoder_embed_dim))#.to(device)
         
         # Positional embeddings for the decoder
-        self.positional_embeddings = nn.Parameter(torch.randn(1, max_seq_length, decoder_embed_dim)) #make positional embedding for the 
+        self.positional_embeddings = nn.Parameter(torch.randn(1, max_seq_length, decoder_embed_dim))#.to(device) #make positional embedding for the 
         
-        decoder_layer = nn.TransformerDecoderLayer(d_model=decoder_embed_dim, nhead=num_heads, dropout=dropout_rate) #initialize the decoderlayers
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=decoder_embed_dim, nhead=num_heads, dropout=dropout_rate)#.to(device) #initialize the decoderlayers
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)#.to(device)
         
         # Output projection layer to match the original data dimensionality
-        self.output_proj = nn.Linear(decoder_embed_dim, embed_dim)
+        self.output_proj = nn.Linear(decoder_embed_dim, embed_dim)#.to(device)
 
     def forward(self, encoded_patches, binary_mask):
         """
@@ -126,7 +127,7 @@ class TimeSeriesMAEDecoder(nn.Module):
         """
         batch_size, seq_len, _ = encoded_patches.size()
         
-        decoder_input = torch.where(binary_mask, encoded_patches, self.mask_tokens.expand(batch_size, seq_len, self.decoder_embed_dim))
+        decoder_input = torch.where(binary_mask, encoded_patches, self.mask_tokens.expand(batch_size, seq_len, self.decoder_embed_dim))#, device=device)
         
         decoder_input += self.positional_embeddings[:, :seq_len, :]
         

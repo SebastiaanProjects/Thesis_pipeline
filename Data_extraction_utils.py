@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 import random
 import pandas as pd
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 
@@ -21,8 +22,8 @@ class TimeSeriesDataset(Dataset):
             durations (np.array): Duration of each behaviour in seconds or frames.
             labels (np.array): The behaviour labels for each time step.
         """
-        self.features = torch.tensor(features, dtype=torch.float32)
-        self.labels = torch.tensor(labels, dtype=torch.long)
+        self.features = torch.tensor(features, dtype=torch.float32)#, device=device)
+        self.labels = torch.tensor(labels, dtype=torch.long)#, device=device)
         
         self.durations = durations
         self.keypoints = keypoints
@@ -73,7 +74,7 @@ def partition_and_mask(data, segment_size=10, mask_percentage=0.9, pad_value=0):
     num_to_mask = int(num_segments * mask_percentage)                           #amount of masked batches
     mask_indices = np.random.choice(num_segments, num_to_mask, replace=False)   #randomize the batches that are masked
     
-    binary_mask = torch.ones_like(segments, dtype=torch.float32)  # Create a binary mask with the same shape
+    binary_mask = torch.ones_like(segments, dtype=torch.float32)#, device=device)  # Create a binary mask with the same shape
     masked_segments = segments.clone()  # Clone to avoid modifying the original data
 
     for index in mask_indices:
@@ -225,3 +226,10 @@ def prepare_behaviour_data_duration(original_features, original_labelling, downs
 
     return original_features, original_labelling, durations_all, starts_and_endings_all, keypoints_all, labels_all #labels contains all the labels as structured in the original data, labels_all structures the unique labels after eachother
 
+def most_logical_fold(trainingsetsize):
+    #usually the number of folds. between 5 or 10 is most preferable, see what's closest to that interval
+    divide_options = []
+    for i in np.arange(1, trainingsetsize):
+        if trainingsetsize%i ==0:
+            if i <= 15 and i > 5:
+                return i

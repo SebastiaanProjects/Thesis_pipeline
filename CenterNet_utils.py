@@ -6,8 +6,8 @@ import seaborn as sns
 import torch.nn.init as init
 import pandas as pd
 import torch.nn as nn
-from data_composer import labels_for_refrence
-device = torch.device('cuda')
+from data_composer import labels_for_refrence, sequence_length, num_classes
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class TimeSeriesCenterNet(nn.Module):
@@ -29,16 +29,16 @@ class TimeSeriesCenterNet(nn.Module):
 
     Example Usage:
         # Assume `x` is a batch of time-series data and `encoder` is a pre-trained encoder
-        model = TimeSeriesCenterNet(encoder, num_classes=10)
+        model = TimeSeriesCenterNet(encoder, num_classes=14)
         heatmap, size, offset = model(x, mask)
     """
     def __init__(self, encoder, num_classes, downsampling_factor, sequence_length):
         super().__init__()
-        self.encoder = encoder
-        self.detection_head = CenterNet1DHead(encoder.embed_dim, num_classes, downsampling_factor, sequence_length) #used to be just one detection head, so might differ now that there 's three classes. 
+        self.encoder = encoder#.to(device)
+        self.detection_head = CenterNet1DHead(encoder.embed_dim, num_classes, downsampling_factor, sequence_length)#.to(device) #used to be just one detection head, so might differ now that there 's three classes. 
 
     def forward(self, x, mask, downsample_factor): #mask is not used for CenterNet but it is for the encoder
-        encoded_features = self.encoder(x,mask)
+        encoded_features = self.encoder(x,mask)#.to(device),mask.to(device))
         heatmap, size, offset = self.detection_head(encoded_features)
         return heatmap, size, offset
     
@@ -65,7 +65,7 @@ class CenterNet1DHead(nn.Module):
 
     Example Usage:
         # Assume `features` is a batch of time-series data after passing through an encoder
-        detection_head = CenterNet1DHead(input_dim=64, num_classes=10)
+        detection_head = CenterNet1DHead(input_dim=64, num_classes=14)
         heatmap, size, offset = detection_head(features)
     """
     def __init__(self, input_dim, num_classes, downsampling_factor, maximum_duration):
@@ -157,7 +157,7 @@ def generate_heatmaps(batch_size, sequence_length, keypoints_batch, classes_batc
             for i in range(downsampled_length):
                 heatmaps_batch[b, clas, i] += np.exp(-((i - keypoint) ** 2) / (2 * object_size_adaptive_std ** 2))
     
-    return torch.tensor(heatmaps_batch, dtype=torch.float32)
+    return torch.tensor(heatmaps_batch, dtype=torch.float32)#, device=device)
 
 def generate_size_maps(batch_size, sequence_length, keypoints_batch, durations_batch, downsample_factor=1):
     """
@@ -181,7 +181,7 @@ def generate_size_maps(batch_size, sequence_length, keypoints_batch, durations_b
             downsampled_keypoint = keypoint // downsample_factor
             size_maps_batch[b, int(downsampled_keypoint)] = duration // downsample_factor  # Directly assign the duration to the keypoint position
         
-    return torch.tensor(size_maps_batch, dtype=torch.float32).squeeze(1)
+    return torch.tensor(size_maps_batch, dtype=torch.float32).squeeze(1)#,device=device).squeeze(1)
 
 def generate_offset_map(batch_size, sequence_length, keypoints_batch, downsample_factor=1):
     """
@@ -205,7 +205,7 @@ def generate_offset_map(batch_size, sequence_length, keypoints_batch, downsample
             offset = (keypoint % downsample_factor) / downsample_factor
             offset_maps_batch[b, int(downsampled_keypoint)] = offset
     
-    return torch.tensor(offset_maps_batch, dtype=torch.float32)
+    return torch.tensor(offset_maps_batch, dtype=torch.float32)#, device=device)
 #not necessary
 def extract_peaks_per_class(heatmap, K=5):
     """
@@ -406,7 +406,7 @@ def focal_loss_weight_tensor(list_of_behaviour):
     weights = {label: weight / total_weight for label, weight in weights.items()} # make all the weights sum to 1
 
     label_to_index = {label: idx for idx, label in enumerate(sorted(occurences.keys()))} # make the mapping from label to index
-    weight_tensor = torch.zeros(len(label_to_index), dtype=torch.float32)
+    weight_tensor = torch.zeros(len(label_to_index), dtype=torch.float32)#, device=device)
 
     for label, weight in weights.items(): # making sure the correct weights are at the correct index
         index = label_to_index[label]
@@ -434,7 +434,7 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, beta=4,weight_tens
     neg_inds = target_tensor.lt(1).float()
 
     #create another masking procedure to give weights per class
-    weights = focal_loss_weight_tensor(weight_tensor)
+    weights = focal_loss_weight_tensor(weight_tensor)#.to(device)
     weights = weights.unsqueeze(0).unsqueeze(2).repeat(1,1,prediction_tensor.size(2))
 
     # Positive loss
@@ -470,7 +470,7 @@ def process_peaks_per_class_new(predicted_heatmap, real_heatmap, window_size=3):
     batch_size, num_classes, width = predicted_heatmap.size()
     
     # Apply NMS and extract peaks
-    heatmap_nms = torch.zeros_like(predicted_heatmap)
+    heatmap_nms = torch.zeros_like(predicted_heatmap)#, device=device)
     for b in range(batch_size):
         for c in range(num_classes):
             heatmap_nms[b, c] = nms_1d(predicted_heatmap[b, c], window_size)
@@ -538,7 +538,7 @@ def non_maximum_suppression_1d(heatmap, window_size=9):
     
     return suppressed_heatmap
 
-def adaptive_peak_extraction(heatmap, window_size=9, prominence_factor=0.75):
+def adaptive_peak_extraction(heatmap, window_size=9, prominence_factor=0.75): #window = 9, 
     """
     Extract peaks from a 2D heatmap using adaptive thresholding.
     
@@ -615,7 +615,7 @@ def combine_peaks_with_maps(extracted_peaks, size_map, offset_map, downsampling_
         combined_peaks.append(batch_list)
     return combined_peaks
 
-def neighbouring_peaks_sort(extracted_peaks):
+def neighbouring_peaks_sort(extracted_peaks): #3 as relative difference
     """
     Sort peaks by position and select the highest activation peaks, ensuring no two peaks of the same class are adjacent unless separated by another class.
     
@@ -713,13 +713,16 @@ def iou_based_peak_suppression(peaks, iou_threshold=0.5):
             indices = indices[1:] 
             
             remaining_indices = []
-            for index in indices:
+            for index in indices:  #think heres the problem
                 if iou_1d(current_range, ranges[index]) < iou_threshold:
                     remaining_indices.append(index)
             indices = remaining_indices
 
         filtered_peaks = [peaks[batchnr][i] for i in keep]
-        batch_filtered_peaks.append(filtered_peaks)
+        ascending_activation_peaks = sorted(filtered_peaks, key=lambda x: x[2]) 
+        batch_filtered_peaks.append(ascending_activation_peaks) 
+        #should place the highest activations the latest such that when the peak handeling happens only from left to right of this list
+        #the highest activations will be last and have the highest influence
     return batch_filtered_peaks
 
 def iou_1d(range1, range2):
@@ -745,7 +748,7 @@ def iou_1d(range1, range2):
     
     return intersection / union
 
-def reconstruct_timelines(peaks, original_length):
+def reconstruct_timelines_ascending_activation(peaks, original_length): #now high activation is first, but is should be last
     """
     Reconstruct the timeline with labels, ensuring no position is left unlabeled.
     
@@ -756,9 +759,12 @@ def reconstruct_timelines(peaks, original_length):
     Returns:
     - torch.Tensor: Reconstructed timeline with labels.
     """
+    #(classnr, position, activaton, size, offset)
+
+     #
     timelines=[]
     for batch_nr in range(len(peaks)): #w/o len
-        timeline = torch.zeros(original_length, dtype=int)
+        timeline = torch.zeros(original_length, dtype=int)#, device=device)
         for class_idx, pos, activation, size, offset in peaks[batch_nr]:
             start = int(pos + offset - size / 2)
             end = int(pos + offset + size / 2)
@@ -830,5 +836,106 @@ def illegal_smooth_timeline(timeline, min_length=3):
             start_idx = i
     
     return smoothed_timeline
+
+# create a gaussian interpretation of the peaks. AKA make all the activation peaks into real peaks and take only the hihgest activations. 
+#this will result in the activation of a point cloaser to the center of an activation to be stronger. 
+
+#create x tensors of size 200 for each peak available. meaning that we get a tensor torch.size(peaknr, sequencelength)
+# each inividual tensor consists of a gaussian spread kernel based on the activation of the peak. 
+# i.e. (class_nr, position, activation, size, offset), (8, 80, 0.5, 20, 1) will give a tensor with zeros apart from 80-20 till 80 + 20. 
+#   within that supposed range there will be a peak at 80 of 0.5 and that will fluidly go down
+
+def reconstruct_timelines_gaussian_support(peaks, original_length):
+    """
+    Reconstruct the timeline with labels, ensuring no position is left unlabeled.
+    
+    Args:
+    - peaks list of (list of tuples): Each tuple contains (class_index, position, activation, size, offset).
+    - original_length (int): Original length of the time series.
+    
+    Returns:
+    - torch.Tensor: Reconstructed timeline with labels.
+    """
+    timelines = []
+    for batch_nr in range(len(peaks)):  # Process each batch separately
+        position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
+        timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
+        class_conversion = {} #from order back to class_nrs
+        gaussian_smoothed_maps = []
+        for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
+            class_conversion[index] = class_index
+            gaussian_smoothed_maps.append(create_smooth_gaussian_kernel(sequence_length=sequence_length, peak_position= pos+offset, activation_peak=activation, size= size, widefactor=4))
+        
+        gaussummary = torch.stack(gaussian_smoothed_maps, dim=0)
+        timeline = torch.argmax(gaussummary, dim=0)
+        timeline = torch.tensor([class_conversion[int(item)] for item in timeline])#, device=device)
+        timelines.append(timeline)
+    
+    combined_timelines = torch.stack(timelines, dim=0)
+    combined_timelines#.to(device)
+    return combined_timelines
+
+def create_smooth_gaussian_kernel(sequence_length, peak_position, activation_peak, size, widefactor):
+    """
+    Create a tensor with a wider, smooth Gaussian-like kernel centered at peak_position.
+
+    Parameters:
+    - sequence_length (int): The length of the sequence.
+    - peak_position (int): The position of the peak activation.
+    - activation_peak (float): The peak activation value.
+    - size (int): The size parameter indicating the spread of the Gaussian.
+
+    Returns:
+    - torch.Tensor: The tensor representing the wider, smooth Gaussian kernel.
+    """
+    kernel = torch.zeros(sequence_length)#, device=device)
+    t = torch.arange(sequence_length, dtype=torch.float32)#, device=device) #generate all the positions pytorch.style()
+    
+    # Calculate the wider Gaussian values
+    std_dev = size / widefactor  # Adjust this value to make the curve wider and smooth
+    gaussian_values = activation_peak * torch.exp(-((t - peak_position) ** 2) / (2 * std_dev ** 2))
+    kernel = gaussian_values
+    kernel = kernel#.to(device)
+
+    return kernel
+
+def reconstruct_timelines_start_max_activation(peaks, original_length):
+    """
+    Reconstruct the timeline with labels, ensuring no position is left unlabeled. Basing relavance only on the maximum of the peak 
+    
+    Args:
+    - peaks list of (list of tuples): Each tuple contains (class_index, position, activation, size, offset).
+    - original_length (int): Original length of the time series.
+    
+    Returns:
+    - torch.Tensor: Reconstructed timeline with labels.
+    """
+    timelines = []
+    for batch_nr in range(len(peaks)):  # Process each batch separately
+        position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
+        timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
+
+        for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
+            start = int(pos + offset - size / 2)
+            end = int(pos + offset + size / 2)
+            start = max(0, start)
+            end = min(original_length, end)
+
+            # Check for overlap with the next detection, if it exists
+            if index < len(position_based_order) - 1:
+                (next_class_index, next_pos, next_activation, next_size, next_offset) = position_based_order[index + 1]
+                next_start = int(next_pos + next_offset - next_size / 2)
+                
+                if next_start < end:  # There is an overlap
+                    if next_activation > activation:
+                        end = next_start  # Cut the current range to avoid overlap
+                        
+            timeline[start:end] = class_index  # Assign the class index to the range
+        
+        timelines.append(timeline)
+    
+    combined_timelines = torch.stack(timelines, dim=0)
+    return combined_timelines
+
 
 
