@@ -87,14 +87,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             average_accuracy.update(total_predictions_tensor, total_labels_tensor)
             recall_per_class.update(total_predictions_tensor, total_labels_tensor)
             average_recall.update(total_predictions_tensor, total_labels_tensor)
-            #print("accuracy per class:", accuracy_per_class.compute())
-            #print("recall per class:", recall_per_class.compute())
 
-            ### Combined scalar logging for Training metrics ###
-            #writer.add_scalars('Training/Metrics', {
-            #    'average_precision': average_accuracy.compute(),
-            #    'average_recall': average_recall.compute()
-            #}, epoch * len(train_loader) + fold)
             
             ## testing which reconstruction is best, not final version: 
             total_predictions_gs.append(reconstruct_timelines_gaussian_support(filtered_peaks, sequence_length))
@@ -108,14 +101,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             average_accuracy_gs.update(total_predictions_gs_tensor, total_labels_tensor)
             recall_per_class_gs.update(total_predictions_gs_tensor, total_labels_tensor)
             average_recall_gs.update(total_predictions_gs_tensor, total_labels_tensor)
-            #print("accuracy per class gaussian support:", accuracy_per_class_gs.compute())
-            #print("recall per class gaussian support:", recall_per_class_gs.compute())
-            
-            ### Combined scalar logging for Training metrics (gaussian support) ###
-            #writer.add_scalars('Training/Metrics gaussian support', {
-            #    'average_precision': average_accuracy_gs.compute(),
-            #    'average_recall': average_recall_gs.compute()
-            #}, epoch * len(train_loader) + fold)
+
 
             total_predictions_sma.append(reconstruct_timelines_start_max_activation(filtered_peaks, sequence_length))
             total_predictions_sma_tensor = torch.stack(total_predictions_sma, dim=0).flatten()
@@ -128,14 +114,6 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             average_accuracy_sma.update(total_predictions_sma_tensor, total_labels_tensor)
             recall_per_class_sma.update(total_predictions_sma_tensor, total_labels_tensor)
             average_recall_sma.update(total_predictions_sma_tensor, total_labels_tensor)
-            #print("accuracy per class start maximum activation:", accuracy_per_class_sma.compute())
-            #print("recall per class start maximum activation:", recall_per_class_sma.compute())
-            
-            ### Combined scalar logging for Training metrics (start maximum activation) ###
-            #writer.add_scalars('Training/Metrics start maximum activation', {
-            #    'average_precision': average_accuracy_sma.compute(),
-            #    'average_recall': average_recall_sma.compute()
-            #}, epoch * len(train_loader) + fold)
 
             optimizer.step()
 
@@ -195,14 +173,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                     average_accuracy_val.update(total_predictions_val_tensor, total_labels_tensor_val)
                     recall_per_class_val.update(total_predictions_val_tensor, total_labels_tensor_val)
                     average_recall_val.update(total_predictions_val_tensor, total_labels_tensor_val)
-                    #print("accuracy per class:", accuracy_per_class_val.compute())
-                    #print("recall per class:", recall_per_class_val.compute())
-                    
-                    ### Combined scalar logging for Validation metrics ###
-                    #writer.add_scalars('Validation/Metrics', {
-                    #    'average_precision': average_accuracy_val.compute(),
-                    #    'average_recall': average_recall_val.compute()
-                    #}, epoch * len(validation_loader) + fold)
+
 
                     ## testing which reconstruction is best, not final version:
                     total_predictions_val_gs.append(reconstruct_timelines_gaussian_support(filtered_peaks, sequence_length))

@@ -66,6 +66,14 @@ indexed_labels_list_train = prepare_targets(labels_list_train, labels_for_refren
 indexed_labels_list_test = prepare_targets(labels_list_test, labels_for_refrence)
 
 
+#finding the segements with the most behaviours in them, to help determine what a good window_size is for peak extraction
+#find the behaviour which occurs most often, if the most occuring action within one segment occurs 5 times, we know that
+#we can split the sequence length into roughly 5 segments to also capture the peaks for one behaviour
+
+max_occurrence_per_segment = [max(behaviourslist.count(x) for x in set(behaviourslist)) for behaviourslist in labels_list_train]
+window_size = int(sequence_length/(max(max_occurrence_per_segment)))
+
+
 #trainingset is now 500 sequences. 
 #by division the most logical kfold will be 10 folds of size 500.
 #this leaves 113 for the testset, allowing for stratification to occur in a strict fashion

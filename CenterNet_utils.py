@@ -52,8 +52,8 @@ class CenterNet1DHead(nn.Module):
     - num_classes (int): The number of behavior classes that the model should predict.
 
     Attributes:
-    - heatmap_head (nn.Module): Convolutional layer to predict the heatmap for behavior localization.
-    - size_head (nn.Module): Convolutional layer to predict the size or duration of the behavior.
+    - heatmap_head (nn.Module): Convolutional layer in combinatino with a sigmoid funcitno to predict the heatmap for behavior localization.
+    - size_head (nn.Module): Convolutional layer in combination with a sigmoid function to predict the size or duration of the behavior.
     - offset_head (nn.Module): Convolutional layer to predict the offset for precise behavior localization.
 
     Forward Pass Input:
@@ -404,7 +404,7 @@ def focal_loss_weight_tensor(list_of_behaviour):
 
     weights = {label: 1/np.sqrt(count) for label, count in occurences.items()} # weights as inverse of the square root of class frequencies
     total_weight = sum(weights.values())
-    weights = {label: weight / total_weight for label, weight in weights.items()} # make all the weights sum to 1
+    weights = {label: (weight / total_weight)**0.5 for label, weight in weights.items()} # make all the weights sum to 1, but normalized extra by adding **0.5. And doing value for heatmap loss by somthing between 2 and 10.. 
 
     label_to_index = {label: idx for idx, label in enumerate(sorted(occurences.keys()))} # make the mapping from label to index
     weight_tensor = torch.zeros(len(label_to_index), dtype=torch.float32)#, device=device)
@@ -413,9 +413,9 @@ def focal_loss_weight_tensor(list_of_behaviour):
         index = label_to_index[label]
         weight_tensor[index] = weight
 
-    return weight_tensor
-#                                                           there will be an error here, run cell 5&6 and then this again
-def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, beta=4,weight_tensor=labels_for_refrence, class_weights_activated=False):
+    return weight_tensor * num_classes ** 0.5
+#                                                            #gamma used to be four there will be an error here, run cell 5&6 and then this again
+def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, gamma=4,weight_tensor=labels_for_refrence, class_weights_activated=False, device=False):
     """
     Compute the manual loss.
     
@@ -423,7 +423,7 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, beta=4,weight_tens
         prediction_tensor (torch.Tensor): Predictions of size [batch_len, classes, positions].
         target_tensor (torch.Tensor): Targets of size [batch_len, classes, positions].
         alpha (float): Modifier for positive samples.
-        beta (float): Modifier for negative samples.
+        gamma (float): Modifier for negative samples.
     
     Returns:
         torch.Tensor: The computed loss.
@@ -431,32 +431,60 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, beta=4,weight_tens
     epsilon = 1e-8  # Small value to avoid log(0)
     
     # Create a masking procedure to instatiate the which formula needs to be used
-    pos_inds = target_tensor.eq(1).float() 
-    neg_inds = target_tensor.lt(1).float()
+    if device == False:
+        pos_inds = target_tensor.eq(1).float() 
+        neg_inds = target_tensor.lt(1).float()
+        weights = focal_loss_weight_tensor(weight_tensor)
+
+        # Positive loss
+        pos_loss = -((1 - prediction_tensor) ** alpha) * torch.log(prediction_tensor + epsilon)
+        pos_loss = pos_loss * pos_inds      
+        # Negative loss
+        neg_loss = -((1 - target_tensor) ** gamma) * (prediction_tensor ** alpha) * torch.log(1 - prediction_tensor + epsilon)
+        neg_loss = neg_loss * neg_inds
+    else:
+        pos_inds = target_tensor.eq(1).to(device)
+        pos_inds = pos_inds.float() 
+        neg_inds = target_tensor.lt(1).to(device)
+        neg_inds = neg_inds.float()
+        weights = focal_loss_weight_tensor(weight_tensor).to(device)
+
+        pos_loss = -((1 - prediction_tensor) ** alpha) * torch.log(prediction_tensor + epsilon)
+        pos_loss = pos_loss.to(device)
+        pos_loss = pos_loss * pos_inds
+
+        neg_loss = -((1 - target_tensor) ** gamma) * (prediction_tensor ** alpha) * torch.log(1 - prediction_tensor + epsilon)
+        neg_loss = neg_loss.to(device)
+        neg_loss = neg_loss * neg_inds
+
+
 
     #create another masking procedure to give weights per class
-    weights = focal_loss_weight_tensor(weight_tensor)#.to(device)
-    weights = weights.unsqueeze(0).unsqueeze(2).repeat(1,1,prediction_tensor.size(2))
-
-    # Positive loss
-    pos_loss = -((1 - prediction_tensor) ** alpha) * torch.log(prediction_tensor + epsilon)
-    pos_loss = pos_loss * pos_inds  
-    if class_weights_activated: #weights will decrease the influence of heatmaploss in validation loss, but will perform stronger to combat imbalance
-        pos_loss *= weights
-    # Negative loss
-    neg_loss = -((1 - target_tensor) ** beta) * (prediction_tensor ** alpha) * torch.log(1 - prediction_tensor + epsilon)
-    neg_loss = neg_loss * neg_inds
-    if class_weights_activated:
-        neg_loss *= weights 
     
     # Combine positive and negative loss
     loss = pos_loss + neg_loss
     
     # Average over the batch and classes
+
+    if class_weights_activated:
+        loss = loss.sum(dim=2) #sum over each position, and give classes a seperate weight. now torch.size(batchnr, num_classes)
+        loss = loss * weights 
+        loss = loss.sum(dim=1)
+        loss = loss.mean()
+        return loss * num_classes
+
     loss = loss.sum(dim=(1, 2))  # Sum over positions and classes
     loss = loss.mean()  #average over batch
 
-    return loss    
+    #if classweights are activated, then the influence of the heatmaploss will decrease drastically. 
+    #resulting in more focus on sizemap and offset loss than necessary
+    #this is becuase summation of the weights of each class equals 1
+    #in order to negate this we can do the loss times the number of classes to help out
+
+    #the weighs cause the model to become overly cautious, perhaps try with another waker classweight. 
+
+
+    return loss 
 ##new way at row 512
 def process_peaks_per_class_new(predicted_heatmap, real_heatmap, window_size=3):
     """
@@ -950,7 +978,7 @@ def plot_confusion_matrix(y_true, y_pred, title):
     return fig
 
 
-def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes):
+def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes, test_train_val):
     """
     Plots a bar chart for the given metric and logs it to TensorBoard.
 
@@ -978,4 +1006,4 @@ def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes):
     plt.tight_layout()
 
     # Log the figure to TensorBoard
-    writer.add_figure(f'{metric_name} by Class', fig, global_step)
+    writer.add_figure(f'{test_train_val}/{metric_name} by Class', fig, global_step)

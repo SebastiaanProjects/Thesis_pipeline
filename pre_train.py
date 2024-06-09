@@ -10,7 +10,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 writer = SummaryWriter()
 
 #                                   4               64          16              3           0.1
-pretrained_encoder = TimeSeriesMAEEncoder(segment_dim=4, embed_dim=64, num_heads=16, num_layers=4, dropout_rate=0.2)#.to(device) #64 may be higher. Just for decoder to decide. 
+pretrained_encoder = TimeSeriesMAEEncoder(segment_dim=4, embed_dim=64, num_heads=16, num_layers=4, dropout_rate=0.1)#.to(device) #64 may be higher. Just for decoder to decide. 
 # use a parameter optimizer to decide, snellius  
 decoder = TimeSeriesMAEDecoder(embed_dim=4, decoder_embed_dim=64, num_heads=16, num_layers=1, max_seq_length=10, dropout_rate=0.2)#.to(device) #num_mask_tokens=6
 total_loss = 0
@@ -38,7 +38,7 @@ for epoch in range(5):
     errors = []            
     for tensor_200hz in pre_train_tensors_list:
         tensor_200hz = tensor_200hz#.to(device)
-        masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.7)
+        masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.8)
         masked_segments = masked_segments.to(torch.float32)#.to(device)#.float()
         original_segments = original_segments.to(torch.float32)#.to(device)#.float()
         
@@ -82,7 +82,7 @@ for epoch in range(5):
 pretrained_encoder
 
 #now for comparison, the untrained encoder
-untrained_encoder = TimeSeriesMAEEncoder(segment_dim=4, embed_dim=64, num_heads=16, num_layers=4, dropout_rate=0.2)
+untrained_encoder = TimeSeriesMAEEncoder(segment_dim=4, embed_dim=64, num_heads=16, num_layers=4, dropout_rate=0.1)
 
 
 #to-do, look into the high peaks of these cases. The numbers behind length_
