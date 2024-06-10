@@ -9,7 +9,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #loading the unlabelled data for preatraining the MAE sequence
 
-folder_path = r'/home/sebastiman/ProjectenFolder/big-tuna/crab plover data new'
+folder_path = r'/home/sebastiman/ProjectenFolder/big-tuna/crab plover data new' #Dear reader, fill in own pathway
 csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
 pre_train_tensors_list = []
 
@@ -36,7 +36,7 @@ pre_train_tensors_list
 
 
 #loading in the labelled data for the training
-labelled = pd.read_csv('/home/sebastiman/ProjectenFolder/big-tuna/calibrated_and_labelled_crabplovers_pt_2.csv') #filled in missing labels
+labelled = pd.read_csv('/home/sebastiman/ProjectenFolder/big-tuna/calibrated_and_labelled_crabplovers_pt_2.csv') #fill in own pathway
 #extracting only the b.int and x y z accelerations and speed in this case. For 16 classes
 
 

@@ -99,13 +99,6 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             total_predictions_gs_tensor = torch.stack(total_predictions_gs, dim=0).flatten()
             total_predictions_sma_tensor = torch.stack(total_predictions_sma, dim=0).flatten()
 
-            #accuracy_per_class = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
-            #accuracy_per_class.update(total_predictions_aa_tensor, total_labels_tensor)
-            #recall_per_class = MulticlassRecall(average=None, num_classes=num_classes)
-            #recall_per_class.update(total_predictions_aa_tensor, total_labels_tensor)
-            #print("accuracy per class:", accuracy_per_class.compute())
-            #print("recall per class:", recall_per_class.compute())
-
             average_accuracy_aa, average_accuracy_gs, average_accuracy_sma  = MulticlassAccuracy(), MulticlassAccuracy(), MulticlassAccuracy()
             average_recall_aa, average_recall_gs, average_recall_sma  = MulticlassRecall(), MulticlassRecall(), MulticlassRecall()
             average_precision_aa, average_precision_gs, average_precision_sma = precision_score(total_predictions_aa_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_gs_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_sma_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0) #change to gpu if better suiting, cpu ran better in my case

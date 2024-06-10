@@ -5,10 +5,9 @@ from torch.nn import Transformer
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 import numpy as np
-import random
 import pandas as pd
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class TimeSeriesDataset(Dataset):
