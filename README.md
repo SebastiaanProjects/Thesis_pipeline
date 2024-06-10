@@ -22,7 +22,6 @@ When combining the two models in pipeline_with_pretrain the Decoder is replaced 
 
 To set up the project locally, clone the repository and install the necessary dependencies:
 
-```bash
 git clone https://github.com/SebastiaanProjects/Thesis_pipeline.git
 cd your-repository
 pip install -r requirements.txt
