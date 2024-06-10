@@ -742,7 +742,7 @@ def iou_based_peak_suppression(peaks, iou_threshold=0.5):
             indices = indices[1:] 
             
             remaining_indices = []
-            for index in indices:  #think heres the problem
+            for index in indices:
                 if iou_1d(current_range, ranges[index]) < iou_threshold:
                     remaining_indices.append(index)
             indices = remaining_indices
