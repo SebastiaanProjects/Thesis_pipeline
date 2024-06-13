@@ -30,7 +30,7 @@ print(len(pre_train_tensors_list))
 random.seed(1)
 random.shuffle(pre_train_tensors_list)
 
-for epoch in range(5):
+for epoch in range(20):
     errors = []            
     for tensor_200hz in pre_train_tensors_list:
         tensor_200hz = tensor_200hz#.to(device)
@@ -44,8 +44,6 @@ for epoch in range(5):
         # Expand the binary mask to match the embedded dimensions properly for my case we are using 16 which is decoder.num_heads
         binary_mask_expanded = binary_mask.unsqueeze(-1).repeat(1, 1, 1, decoder.num_heads).view(binary_mask.size(0), binary_mask.size(1), -1)#.to(device)
         boolean_mask_expanded = binary_mask_expanded.to(torch.bool)#.to(device) #turn mask into boolean mask 
-
-
         reconstructed_data = decoder(encoded_segments, boolean_mask_expanded)#.to(device)
         reconstructed_data = reconstructed_data.to(torch.float32)#.to(device)
 

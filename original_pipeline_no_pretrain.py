@@ -375,6 +375,12 @@ for features, labels , durations, keypoints, labels_list in train_loader:
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
+    #writer.add_scalars('train/heatmaplosstotal', heatmap_loss/len(trainingset), 0)
+    #writer.add_scalars('train/offsetlosstotal', l1_loss_offset/len(trainingset), 0)
+    #writer.add_scalars('train/sizelosstotal', l1_loss_size/len(trainingset), 0)
+    #writer.add_scalars('train/validationlosstotal', total_loss/len(trainingset), 0)
+
+
 test_loader = DataLoader(testset, batch_size=len(testset), collate_fn=custom_collate_fn ,pin_memory=True)
 
 for features, labels , durations, keypoints, labels_list in test_loader:  
@@ -415,7 +421,8 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     
     precision_aa, precision_gs, precision_sma = precision_score(timelines_aa_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average=None, zero_division=0) #change to gpu if better suiting, cpu ran better in my case
     f1_score_aa , f1_score_gs, f1_score_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None)
-    #one_hot_aa, one_hot_gs, one_hot_sma = torch.nn.functional.one_hot(reconstructed_timelines_aa, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_gs, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_sma, num_classes=num_classes).float().to(device)
+    f1_score_micro_aa , f1_score_micro_gs, f1_score_micro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro')
+
 
     accuracy_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     accuracy_gs.update(reconstructed_timelines_gs, total_labels_tensor)
@@ -424,29 +431,6 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     recall_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     recall_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     recall_sma.update(reconstructed_timelines_sma, total_labels_tensor)
-
-    #curve_aa.update(one_hot_aa, total_labels_tensor)
-    #curve_gs.update(one_hot_gs, total_labels_tensor)
-    #curve_sma.update(one_hot_sma, total_labels_tensor) 
-
-    
-
-    
-
-    # Compute the precision-recall curve
-    #precision_aa_for_curve, recall_aa_for_curve, thresholds_aa = curve_aa.compute()
-    #precision_gs_for_curve, recall_gs_for_curve, thresholds_gs = curve_gs.compute()
-    #precision_sma_for_curve, recall_sma_for_curve, thresholds_sma = curve_sma.compute()
-
-    # Plot and save precision-recall curves
-    #pr_aa_fig = plot_precision_recall_curve(precision_aa_for_curve, recall_aa_for_curve, 'Precision-Recall Curve (Last Activation)')
-    #pr_gs_fig = plot_precision_recall_curve(precision_gs_for_curve, recall_gs_for_curve, 'Precision-Recall Curve (Gaussian Support)')
-    #pr_sma_fig = plot_precision_recall_curve(precision_sma_for_curve, recall_sma_for_curve, 'Precision-Recall Curve (Start Max Activation)')
-
-    ## Log precision-recall curves to TensorBoard
-    #writer.add_figure('Test/PR_Curve_last_activation', pr_aa_fig)
-    #writer.add_figure('Test/PR_Curve_gaussian_support', pr_gs_fig)
-    #writer.add_figure('Test/PR_Curve_start_max_activation', pr_sma_fig)
 
     accuracy_per_class_aa = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
     accuracy_per_class_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -532,11 +516,12 @@ for features, labels , durations, keypoints, labels_list in test_loader:
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
-    #writer.add_scalars('Test/precision', {
-    #    'last activation average recall' : precision_aa,
-    #    'start maximum activation average recall' : precision_sma,
-    #    'gaussian support average recall' : precision_gs 
-    #}, 0)
+    writer.add_scalars('Test/f1', {
+        'last activation f1' : f1_score_micro_aa,
+        'start maximum activation f1' : f1_score_micro_sma,
+        'gaussian support f1' : f1_score_micro_gs 
+    }, 0)
+
 
 
     writer.add_scalar('Test/size_loss', l1_loss_size.item(), 0)#epoch * len(train_loader) + fold)

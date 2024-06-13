@@ -1,4 +1,4 @@
-from Data_extraction_utils import prepare_targets ,custom_collate_fn, partition_and_mask, TimeSeriesDataset, ensure_label_representation, prepare_behaviour_data_duration, most_logical_fold
+from Data_extraction_utils import prepare_targets ,custom_collate_fn, partition_and_mask, TimeSeriesDataset, ensure_label_representation, prepare_behaviour_data_duration, most_logical_fold, testset_occurences
 import pandas as pd
 import numpy as np
 import torch
@@ -89,5 +89,7 @@ num_classes = len(labels_for_refrence.unique())
 trainingset = TimeSeriesDataset(original_features_train, train_labels_indexed, durations_all_train,  keypoints_all_train, indexed_labels_list_train)
 testset = TimeSeriesDataset(original_features_test, test_labels_indexed, durations_all_test,  keypoints_all_test, indexed_labels_list_test)
 
+#for evaluating:
 
-
+testset_occurences(testset)
+        

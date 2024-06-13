@@ -232,3 +232,14 @@ def most_logical_fold(trainingsetsize):
         if trainingsetsize%i ==0:
             if i <= 15 and i > 5:
                 return i
+            
+def testset_occurences(testset):
+    """I have created the evaluation metrics to work on macro precision, 
+        to calculate the micro precisions the occurences of each class are necessary.
+        Therefor this is the counter for when testset is added"""
+    all_labels = [testset[i][1].tolist() for i in range(len(testset))]
+    all_labels = [item for sublist in all_labels for item in sublist]
+    label_frame = pd.DataFrame(all_labels, columns=['labels'])
+    print("Occurrences of each class:")
+    print(label_frame['labels'].value_counts())
+    return label_frame['labels'].value_counts().to_dict()

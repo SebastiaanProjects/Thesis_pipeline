@@ -436,6 +436,8 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, gamma=4,weight_ten
         neg_inds = target_tensor.lt(1).float()
         weights = focal_loss_weight_tensor(weight_tensor)
 
+        target_tensor[0,5].lt(1)
+
         # Positive loss
         pos_loss = -((1 - prediction_tensor) ** alpha) * torch.log(prediction_tensor + epsilon)
         pos_loss = pos_loss * pos_inds      

@@ -3,7 +3,6 @@ from CenterNet_utils import TimeSeriesCenterNet, generate_heatmaps, generate_off
 from Data_extraction_utils import custom_collate_fn, TimeSeriesDataset
 from pre_train import pretrained_encoder
 from data_composer import trainingset, testset, sequence_length, num_classes, num_folds, train_data_size, batch_size, window_size 
-
 import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
@@ -89,13 +88,6 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             total_predictions_gs_tensor = torch.stack(total_predictions_gs, dim=0).flatten()
             total_predictions_sma_tensor = torch.stack(total_predictions_sma, dim=0).flatten()
 
-            #accuracy_per_class = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
-            #accuracy_per_class.update(total_predictions_aa_tensor, total_labels_tensor)
-            #recall_per_class = MulticlassRecall(average=None, num_classes=num_classes)
-            #recall_per_class.update(total_predictions_aa_tensor, total_labels_tensor)
-            #print("accuracy per class:", accuracy_per_class.compute())
-            #print("recall per class:", recall_per_class.compute())
-
             average_accuracy_aa, average_accuracy_gs, average_accuracy_sma  = MulticlassAccuracy(), MulticlassAccuracy(), MulticlassAccuracy()
             average_recall_aa, average_recall_gs, average_recall_sma  = MulticlassRecall(), MulticlassRecall(), MulticlassRecall()
             average_precision_aa, average_precision_gs, average_precision_sma = precision_score(total_predictions_aa_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_gs_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_sma_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0) #change to gpu if better suiting, cpu ran better in my case
@@ -131,12 +123,6 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             }, trainingstep)
 
 
-            ###
-            
-            writer.add_scalar('Training/size_loss', l1_loss_size.item(), trainingstep)#epoch * len(train_loader) + fold)
-            writer.add_scalar('Training/heatmap_loss', heatmap_loss.item(), trainingstep)#epoch * len(train_loader) + fold)
-            writer.add_scalar('Training/offset_loss', l1_loss_offset.item(), trainingstep)# epoch * len(train_loader) + fold)          
-            writer.add_scalar('Training/total_loss', total_loss.item(), trainingstep)# epoch * len(train_loader) + fold) #item()
         trainingstep += 1
 
         # Validate
@@ -194,16 +180,6 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 l1_loss_offset = l1_loss(offset_prediction, offset_target)            
                 total_loss = heatmaploss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
 
-                def correlation_coefficient(tensor_a, tensor_b):
-                    a_mean = tensor_a - tensor_a.mean(dim=1, keepdim=True)
-                    b_mean = tensor_b - tensor_b.mean(dim=1, keepdim=True)
-                    numerator = (a_mean * b_mean).sum(dim=1)
-                    denominator = torch.sqrt((a_mean ** 2).sum(dim=1) * (b_mean ** 2).sum(dim=1))
-                    return numerator / denominator
-
-
-                #correlation = correlation_coefficient(labels, reconstructed_timelines_aa)
-
                 heatmaploss_tot+= heatmaploss
                 validation_loss+= total_loss
                 l1_loss_size_tot += l1_loss_size
@@ -233,14 +209,15 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
 #where CUDA created overload in the previous segment, it will prove usefull in this segment
 model.to(device)
 
-
+print("len(trainloader)", len(trainingset))
 #now I want to see the evaluation metrics accros the entire training_dataset:
 train_loader = DataLoader(trainingset, batch_size=len(trainingset), collate_fn=custom_collate_fn ,pin_memory=True)
 
 #now I want to see the evaluation metrics accros the entire training_dataset:
 
-
-for features, labels , durations, keypoints, labels_list in train_loader:  
+model.eval()
+for features, labels , durations, keypoints, labels_list in train_loader: 
+    print("trainloader.batchsize", train_loader.batch_size) 
     features = features.to(device)
     labels = labels.to(device) 
     heatmap_target = generate_heatmaps(sequence_length=sequence_length, batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=num_classes, durations_batch= durations, downsample_factor=4).to(device)
@@ -252,7 +229,7 @@ for features, labels , durations, keypoints, labels_list in train_loader:
     size_prediction = size_prediction.squeeze(1)
     offset_prediction = offset_prediction.squeeze(1)
 
-    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target ,device=True).to(device) # ,class_weights_activated=True
+    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target ,device=True)#.to(device) # ,class_weights_activated=True
 
     l1_loss_size = l1_loss(size_prediction, sizemap_target)
     l1_loss_offset = l1_loss(offset_prediction, offset_target) 
@@ -372,6 +349,15 @@ for features, labels , durations, keypoints, labels_list in train_loader:
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
+    print("heatmaploss", heatmap_loss/len(trainingset))
+
+    writer.add_scalars('train/loss/entire_train_dataset', {
+        'heatmaploss':heatmap_loss/len(trainingset),
+        'offsetloss': l1_loss_offset/len(trainingset),
+        'sizeloss': l1_loss_size/len(trainingset),
+        'validationloss': total_loss/len(trainingset)
+    }, 0)
+
 test_loader = DataLoader(testset, batch_size=len(testset), collate_fn=custom_collate_fn ,pin_memory=True)
 
 for features, labels , durations, keypoints, labels_list in test_loader:  
@@ -412,6 +398,8 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     
     precision_aa, precision_gs, precision_sma = precision_score(timelines_aa_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average=None, zero_division=0) #change to gpu if better suiting, cpu ran better in my case
     f1_score_aa , f1_score_gs, f1_score_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None)
+    f1_score_micro_aa , f1_score_micro_gs, f1_score_micro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro')
+
     #one_hot_aa, one_hot_gs, one_hot_sma = torch.nn.functional.one_hot(reconstructed_timelines_aa, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_gs, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_sma, num_classes=num_classes).float().to(device)
 
     accuracy_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -421,29 +409,6 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     recall_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     recall_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     recall_sma.update(reconstructed_timelines_sma, total_labels_tensor)
-
-    #curve_aa.update(one_hot_aa, total_labels_tensor)
-    #curve_gs.update(one_hot_gs, total_labels_tensor)
-    #curve_sma.update(one_hot_sma, total_labels_tensor) 
-
-    
-
-    
-
-    # Compute the precision-recall curve
-    #precision_aa_for_curve, recall_aa_for_curve, thresholds_aa = curve_aa.compute()
-    #precision_gs_for_curve, recall_gs_for_curve, thresholds_gs = curve_gs.compute()
-    #precision_sma_for_curve, recall_sma_for_curve, thresholds_sma = curve_sma.compute()
-
-    # Plot and save precision-recall curves
-    #pr_aa_fig = plot_precision_recall_curve(precision_aa_for_curve, recall_aa_for_curve, 'Precision-Recall Curve (Last Activation)')
-    #pr_gs_fig = plot_precision_recall_curve(precision_gs_for_curve, recall_gs_for_curve, 'Precision-Recall Curve (Gaussian Support)')
-    #pr_sma_fig = plot_precision_recall_curve(precision_sma_for_curve, recall_sma_for_curve, 'Precision-Recall Curve (Start Max Activation)')
-
-    ## Log precision-recall curves to TensorBoard
-    #writer.add_figure('Test/PR_Curve_last_activation', pr_aa_fig)
-    #writer.add_figure('Test/PR_Curve_gaussian_support', pr_gs_fig)
-    #writer.add_figure('Test/PR_Curve_start_max_activation', pr_sma_fig)
 
     accuracy_per_class_aa = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
     accuracy_per_class_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -529,17 +494,23 @@ for features, labels , durations, keypoints, labels_list in test_loader:
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
-    #writer.add_scalars('Test/precision', {
-    #    'last activation average recall' : precision_aa,
-    #    'start maximum activation average recall' : precision_sma,
-    #    'gaussian support average recall' : precision_gs 
-    #}, 0)
+    writer.add_scalars('Test/loss/entire_test_dataset', {
+        'heatmaploss':heatmap_loss/len(trainingset),
+        'offsetloss': l1_loss_offset/len(trainingset),
+        'sizeloss': l1_loss_size/len(trainingset),
+        'validationloss': total_loss/len(trainingset)
+    }, 0)
 
+    writer.add_scalars('Test/f1', {
+        'last activation f1' : f1_score_micro_aa,
+        'start maximum activation f1' : f1_score_micro_sma,
+        'gaussian support f1' : f1_score_micro_gs 
+    }, 0)
 
-    writer.add_scalar('Test/size_loss', l1_loss_size.item(), 0)#epoch * len(train_loader) + fold)
-    writer.add_scalar('Test/heatmap_loss', heatmap_loss.item(), 0)#epoch * len(train_loader) + fold)
-    writer.add_scalar('Test/offset_loss', l1_loss_offset.item(),0)# epoch * len(train_loader) + fold)          
-    writer.add_scalar('Test/total_loss', total_loss.item(), 0)# epoch * len(train_loader) + fold) #item()
+    #writer.add_scalar('Test/size_loss', l1_loss_size.item(), 0)#epoch * len(train_loader) + fold)
+    #writer.add_scalar('Test/heatmap_loss', heatmap_loss.item(), 0)#epoch * len(train_loader) + fold)
+    #writer.add_scalar('Test/offset_loss', l1_loss_offset.item(),0)# epoch * len(train_loader) + fold)          
+    #writer.add_scalar('Test/total_loss', total_loss.item(), 0)# epoch * len(train_loader) + fold) #item()
 
 writer.close()
 
