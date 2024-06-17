@@ -404,7 +404,8 @@ def focal_loss_weight_tensor(list_of_behaviour):
 
     weights = {label: 1/np.sqrt(count) for label, count in occurences.items()} # weights as inverse of the square root of class frequencies
     total_weight = sum(weights.values())
-    weights = {label: (weight / total_weight)**0.5 for label, weight in weights.items()} # make all the weights sum to 1, but normalized extra by adding **0.5. And doing value for heatmap loss by somthing between 2 and 10.. 
+    weights = {label: (weight / total_weight) **0.5 for label, weight in weights.items()} # make all the weights sum to 1, but normalized extra by adding **0.5. And doing value for heatmap loss by somthing between 2 and 10.. 
+
 
     label_to_index = {label: idx for idx, label in enumerate(sorted(occurences.keys()))} # make the mapping from label to index
     weight_tensor = torch.zeros(len(label_to_index), dtype=torch.float32)#, device=device)
@@ -413,7 +414,9 @@ def focal_loss_weight_tensor(list_of_behaviour):
         index = label_to_index[label]
         weight_tensor[index] = weight
 
-    return weight_tensor * num_classes ** 0.5
+    return weight_tensor * num_classes **0.5
+
+print(focal_loss_weight_tensor(labels_for_refrence))
 #                                                            #gamma used to be four there will be an error here, run cell 5&6 and then this again
 def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, gamma=4,weight_tensor=labels_for_refrence, class_weights_activated=False, device=False):
     """
@@ -801,7 +804,7 @@ def reconstruct_timelines_ascending_activation(peaks, original_length): #now hig
             end = int(pos + offset + size / 2)
             start = max(0, start)
             end = min(original_length, end)
-            timeline[start:end] = class_idx # + 1  # Using class_idx + 1 to differentiate from the default zero label
+            timeline[start:end] = class_idx 
         timelines.append(timeline)
     
     combined_timelines = torch.stack(timelines, dim=0)
@@ -968,9 +971,11 @@ def reconstruct_timelines_start_max_activation(peaks, original_length):
     combined_timelines = torch.stack(timelines, dim=0)
     return combined_timelines
 
-
-def plot_confusion_matrix(y_true, y_pred, title):
-    cm = confusion_matrix(y_true, y_pred, normalize='true')
+def plot_confusion_matrix(y_true, y_pred, title, normalize=True):
+    if normalize:
+        cm = confusion_matrix(y_true, y_pred, normalize='true')
+    else:
+        cm = confusion_matrix(y_true, y_pred) 
     fig, ax = plt.subplots(figsize=(10, 8))  # Increase figure size
     sns.heatmap(cm, annot=True, fmt='.2f', cmap='Blues', ax=ax, annot_kws={"size": 10})  # Reduce font size
     ax.set_xlabel('Predicted label')
@@ -978,7 +983,6 @@ def plot_confusion_matrix(y_true, y_pred, title):
     ax.set_title(title)
     plt.tight_layout()
     return fig
-
 
 def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes, test_train_val):
     """

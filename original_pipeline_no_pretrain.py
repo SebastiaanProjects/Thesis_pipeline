@@ -72,7 +72,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
             size_prediction = size_prediction.squeeze(1)
             offset_prediction = offset_prediction.squeeze(1)
 
-            heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target)#, class_weights_activated=True) #manual instantation of focalloss
+            heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target, class_weights_activated=True)#, class_weights_activated=True) #manual instantation of focalloss
             l1_loss_size = l1_loss(size_prediction, sizemap_target)
             l1_loss_offset = l1_loss(offset_prediction, offset_target) 
             total_loss = heatmap_loss + size_contribution * l1_loss_size + offset_contribution * l1_loss_offset
@@ -158,7 +158,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 heatmap_prediction, size_prediction, offset_prediction = output
                 size_prediction = size_prediction.squeeze(1)
                 offset_prediction = offset_prediction.squeeze(1) 
-                heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target)#, class_weights_activated=True)                
+                heatmaploss = manual_loss_v2(heatmap_prediction, heatmap_target, class_weights_activated=True)#, class_weights_activated=True)                
 
                 peaks = evaluate_adaptive_peak_extraction(heatmap_prediction, window_size= (window_size/downsample_factor), prominence_factor=0.75)
                                 
@@ -255,7 +255,7 @@ for features, labels , durations, keypoints, labels_list in train_loader:
     size_prediction = size_prediction.squeeze(1)
     offset_prediction = offset_prediction.squeeze(1)
 
-    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target ,device=True).to(device) # ,class_weights_activated=True
+    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target,class_weights_activated=True, device=True).to(device) # ,class_weights_activated=True
 
     l1_loss_size = l1_loss(size_prediction, sizemap_target)
     l1_loss_offset = l1_loss(offset_prediction, offset_target) 
@@ -280,6 +280,8 @@ for features, labels , durations, keypoints, labels_list in train_loader:
     curve_aa, curve_gs, curve_sma = MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes)
     
     precision_aa, precision_gs, precision_sma = precision_score(timelines_aa_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average=None, zero_division=0) #change to gpu if better suiting, cpu ran better in my case
+
+
     f1_score_aa , f1_score_gs, f1_score_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None)
 
     accuracy_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -312,6 +314,11 @@ for features, labels , durations, keypoints, labels_list in train_loader:
     fig_aa_cm = plot_confusion_matrix(labels_sklearn, timelines_aa_sklearn, 'Normalized Confusion Matrix (Last Activation)')
     fig_gs_cm = plot_confusion_matrix(labels_sklearn, timelines_gs_sklearn, 'Normalized Confusion Matrix (Gaussian Support)')
     fig_sma_cm = plot_confusion_matrix(labels_sklearn, timelines_sma_sklearn, 'Normalized Confusion Matrix (Start Max Activation)')
+
+    fig_aa_cm = plot_confusion_matrix(labels_sklearn, timelines_aa_sklearn,  'Confusion Matrix (Last Activation)', normalize=False)
+    fig_gs_cm = plot_confusion_matrix(labels_sklearn, timelines_gs_sklearn, 'Confusion Matrix (Gaussian Support)' , normalize=False)
+    fig_sma_cm = plot_confusion_matrix(labels_sklearn, timelines_sma_sklearn,  'Confusion Matrix (Start Max Activation)', normalize=False)
+
 
     # Save figures to TensorBoard
     writer.add_figure('Train/Confusion_Matrix_Last_Activation', fig_aa_cm)
@@ -395,7 +402,7 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     size_prediction = size_prediction.squeeze(1)
     offset_prediction = offset_prediction.squeeze(1)
 
-    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target ,device=True).to(device) # ,class_weights_activated=True
+    heatmap_loss = manual_loss_v2(heatmap_prediction, heatmap_target ,class_weights_activated=True, device=True).to(device) # ,class_weights_activated=True
 
     l1_loss_size = l1_loss(size_prediction, sizemap_target)
     l1_loss_offset = l1_loss(offset_prediction, offset_target) 
@@ -414,23 +421,38 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     reconstructed_timelines_sma = reconstruct_timelines_start_max_activation(filtered_peaks,sequence_length).flatten().to(device)
 
     timelines_aa_sklearn, timelines_gs_sklearn, timelines_sma_sklearn = reconstructed_timelines_aa.cpu().numpy().flatten(), reconstructed_timelines_gs.cpu().numpy().flatten(), reconstructed_timelines_sma.cpu().numpy().flatten()
-
+    #The macro's don't work, extract from confusion matrix
     accuracy_aa, accuracy_gs, accuracy_sma  = MulticlassAccuracy(), MulticlassAccuracy(), MulticlassAccuracy()
+    #accuracy_macro_aa, accuracy_macro_gs, accuracy_macro_sma  = MulticlassAccuracy(average='macro'), MulticlassAccuracy(average='macro'), MulticlassAccuracy(average='macro')
+    
     recall_aa, recall_gs, recall_sma  = MulticlassRecall(), MulticlassRecall(), MulticlassRecall()
+    #recall_macro_aa, recall_macro_gs, recall_macro_sma  = MulticlassRecall(average='macro'), MulticlassRecall(average='macro'), MulticlassRecall(average='macro')
+    
     curve_aa, curve_gs, curve_sma = MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes)
     
     precision_aa, precision_gs, precision_sma = precision_score(timelines_aa_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average=None, zero_division=0) #change to gpu if better suiting, cpu ran better in my case
+    #precision_aa_micro, precision_gs_micro, precision_sma_micro = precision_score(timelines_aa_sklearn, labels_sklearn, average='micro', zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average='micro', zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average='micro', zero_division=0)
+    #precision_aa_macro, precision_gs_macro, precision_sma_macro = (precision_score(timelines_aa_sklearn, labels_sklearn, average='macro', zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average='macro', zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average='macro', zero_division=0))
+  
     f1_score_aa , f1_score_gs, f1_score_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None)
-    f1_score_micro_aa , f1_score_micro_gs, f1_score_micro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro')
-
+    #f1_score_micro_aa , f1_score_micro_gs, f1_score_micro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro')
+    #f1_score_macro_aa , f1_score_macro_gs, f1_score_macro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro')
 
     accuracy_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     accuracy_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     accuracy_sma.update(reconstructed_timelines_sma, total_labels_tensor)
+
+    #accuracy_macro_aa.update(reconstructed_timelines_aa, total_labels_tensor)
+    #accuracy_macro_gs.update(reconstructed_timelines_gs, total_labels_tensor)
+    #accuracy_macro_sma.update(reconstructed_timelines_sma, total_labels_tensor)
             
     recall_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     recall_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     recall_sma.update(reconstructed_timelines_sma, total_labels_tensor)
+
+    #recall_macro_aa.update(reconstructed_timelines_aa, total_labels_tensor)
+    #recall_macro_gs.update(reconstructed_timelines_gs, total_labels_tensor)
+    #recall_macro_sma.update(reconstructed_timelines_sma, total_labels_tensor)
 
     accuracy_per_class_aa = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
     accuracy_per_class_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -510,17 +532,50 @@ for features, labels , durations, keypoints, labels_list in test_loader:
         'gaussian support average accuracy' : accuracy_gs.compute() 
     }, 0)
 
+
+    #writer.add_scalars('Test/Accuracy_macro', {
+    #    'last activation average accuracy' : accuracy_macro_aa.compute(),
+    #    'start maximum activation average accuracy' : accuracy_macro_sma.compute(),
+    #    'gaussian support average accuracy' : accuracy_macro_gs.compute() 
+    #}, 0)
+
     writer.add_scalars('Test/recall', {
         'last activation average recall' : recall_aa.compute(),
         'start maximum activation average recall' : recall_sma.compute(),
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
-    writer.add_scalars('Test/f1', {
-        'last activation f1' : f1_score_micro_aa,
-        'start maximum activation f1' : f1_score_micro_sma,
-        'gaussian support f1' : f1_score_micro_gs 
-    }, 0)
+    #writer.add_scalars('Test/recall_macro', {
+    #    'last activation average recall' : recall_macro_aa.compute(),
+    #    'start maximum activation average recall' : recall_macro_sma.compute(),
+    #    'gaussian support average recall' : recall_macro_gs.compute() 
+    #}, 0)
+
+
+    #writer.add_scalars('Test/f1_micro', {
+    #    'last activation f1' : f1_score_micro_aa,
+    #    'start maximum activation f1' : f1_score_micro_sma,
+    #    'gaussian support f1' : f1_score_micro_gs 
+    #}, 0)
+
+    #writer.add_scalars('Test/f1_macro', {
+    #    'last activation f1' : f1_score_macro_aa,
+    #    'start maximum activation f1' : f1_score_macro_sma,
+    #    'gaussian support f1' : f1_score_macro_gs 
+    #}, 0)
+
+    #writer.add_scalars('Test/precision_micro', {
+    #    'last activation precision micro' : precision_aa_micro,
+    #    'start maximum activation precision micro' : precision_gs_micro,
+    #    'gaussian support precision micro' : precision_gs_micro 
+    #}, 0)
+
+    #writer.add_scalars('Test/precision_macro', {
+    #    'last activation precision macro' : precision_aa_macro,
+    #    'start maximum activation precision macro' : precision_gs_macro,
+    #    'gaussian support precision macro' : precision_gs_macro 
+    #}, 0)
+
 
 
 

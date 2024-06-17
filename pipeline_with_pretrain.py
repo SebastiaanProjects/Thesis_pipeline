@@ -90,7 +90,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
 
             average_accuracy_aa, average_accuracy_gs, average_accuracy_sma  = MulticlassAccuracy(), MulticlassAccuracy(), MulticlassAccuracy()
             average_recall_aa, average_recall_gs, average_recall_sma  = MulticlassRecall(), MulticlassRecall(), MulticlassRecall()
-            average_precision_aa, average_precision_gs, average_precision_sma = precision_score(total_predictions_aa_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_gs_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_sma_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0) #change to gpu if better suiting, cpu ran better in my case
+            #average_precision_aa, average_precision_gs, average_precision_sma = precision_score(total_predictions_aa_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_gs_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0), precision_score(total_predictions_sma_tensor.cpu().numpy().flatten(), total_labels_tensor.cpu().numpy().flatten(), average='macro', zero_division=0) #change to gpu if better suiting, cpu ran better in my case
             
             average_accuracy_aa.update(total_predictions_aa_tensor, total_labels_tensor)
             average_accuracy_gs.update(total_predictions_gs_tensor, total_labels_tensor)
@@ -116,11 +116,11 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
                 'gaussian support average recall' : average_recall_gs.compute() 
             }, trainingstep)
 
-            writer.add_scalars('Training/precision', {
-                'last activation average recall' : average_precision_aa,
-                'start maximum activation average recall' : average_precision_sma,
-                'gaussian support average recall' : average_precision_gs 
-            }, trainingstep)
+            #writer.add_scalars('Training/precision', {
+            #    'last activation average recall' : average_precision_aa,
+            #    'start maximum activation average recall' : average_precision_sma,
+            #    'gaussian support average recall' : average_precision_gs 
+            #}, trainingstep)
 
 
         trainingstep += 1
@@ -393,22 +393,36 @@ for features, labels , durations, keypoints, labels_list in test_loader:
     timelines_aa_sklearn, timelines_gs_sklearn, timelines_sma_sklearn = reconstructed_timelines_aa.cpu().numpy().flatten(), reconstructed_timelines_gs.cpu().numpy().flatten(), reconstructed_timelines_sma.cpu().numpy().flatten()
 
     accuracy_aa, accuracy_gs, accuracy_sma  = MulticlassAccuracy(), MulticlassAccuracy(), MulticlassAccuracy()
+    #accuracy_macro_aa, accuracy_macro_gs, accuracy_macro_sma  = MulticlassAccuracy(average='macro'), MulticlassAccuracy(average='macro'), MulticlassAccuracy(average='macro')
+    
     recall_aa, recall_gs, recall_sma  = MulticlassRecall(), MulticlassRecall(), MulticlassRecall()
+    #recall_macro_aa, recall_macro_gs, recall_macro_sma  = MulticlassRecall(average='macro'), MulticlassRecall(average='macro'), MulticlassRecall(average='macro')
+    
     curve_aa, curve_gs, curve_sma = MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes), MulticlassPrecisionRecallCurve(num_classes=num_classes)
     
     precision_aa, precision_gs, precision_sma = precision_score(timelines_aa_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average=None, zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average=None, zero_division=0) #change to gpu if better suiting, cpu ran better in my case
+    precision_aa_micro, precision_gs_micro, precision_sma_micro = precision_score(timelines_aa_sklearn, labels_sklearn, average='micro', zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average='micro', zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average='micro', zero_division=0)
+    #precision_aa_macro, precision_gs_macro, precision_sma_macro = (precision_score(timelines_aa_sklearn, labels_sklearn, average='macro', zero_division=0), precision_score(timelines_gs_sklearn, labels_sklearn, average='macro', zero_division=0), precision_score(timelines_sma_sklearn, labels_sklearn, average='macro', zero_division=0))
+  
     f1_score_aa , f1_score_gs, f1_score_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average=None)
     f1_score_micro_aa , f1_score_micro_gs, f1_score_micro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='micro')
-
-    #one_hot_aa, one_hot_gs, one_hot_sma = torch.nn.functional.one_hot(reconstructed_timelines_aa, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_gs, num_classes=num_classes).float().to(device), torch.nn.functional.one_hot(reconstructed_timelines_sma, num_classes=num_classes).float().to(device)
+    #f1_score_macro_aa , f1_score_macro_gs, f1_score_macro_sma= f1_score(reconstructed_timelines_aa.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro'), f1_score(reconstructed_timelines_gs.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro'), f1_score(reconstructed_timelines_sma.cpu().numpy(), total_labels_tensor.cpu().numpy(), average='macro')
 
     accuracy_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     accuracy_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     accuracy_sma.update(reconstructed_timelines_sma, total_labels_tensor)
+
+    #accuracy_macro_aa.update(reconstructed_timelines_aa, total_labels_tensor)
+    #accuracy_macro_gs.update(reconstructed_timelines_gs, total_labels_tensor)
+    #accuracy_macro_sma.update(reconstructed_timelines_sma, total_labels_tensor)
             
     recall_aa.update(reconstructed_timelines_aa, total_labels_tensor)
     recall_gs.update(reconstructed_timelines_gs, total_labels_tensor)
     recall_sma.update(reconstructed_timelines_sma, total_labels_tensor)
+
+    #recall_macro_aa.update(reconstructed_timelines_aa, total_labels_tensor)
+    #recall_macro_gs.update(reconstructed_timelines_gs, total_labels_tensor)
+    #recall_macro_sma.update(reconstructed_timelines_sma, total_labels_tensor)
 
     accuracy_per_class_aa = MulticlassAccuracy(average=None, num_classes=num_classes) #usefull during trainig to see which classes are underrepresented (14 is absent)
     accuracy_per_class_aa.update(reconstructed_timelines_aa, total_labels_tensor)
@@ -488,29 +502,55 @@ for features, labels , durations, keypoints, labels_list in test_loader:
         'gaussian support average accuracy' : accuracy_gs.compute() 
     }, 0)
 
+
+    #writer.add_scalars('Test/Accuracy_macro', {
+    #    'last activation average accuracy' : accuracy_macro_aa.compute(),
+    #    'start maximum activation average accuracy' : accuracy_macro_sma.compute(),
+    #    'gaussian support average accuracy' : accuracy_macro_gs.compute() 
+    #}, 0)
+
     writer.add_scalars('Test/recall', {
         'last activation average recall' : recall_aa.compute(),
         'start maximum activation average recall' : recall_sma.compute(),
         'gaussian support average recall' : recall_gs.compute() 
     }, 0)
 
-    writer.add_scalars('Test/loss/entire_test_dataset', {
-        'heatmaploss':heatmap_loss/len(trainingset),
-        'offsetloss': l1_loss_offset/len(trainingset),
-        'sizeloss': l1_loss_size/len(trainingset),
-        'validationloss': total_loss/len(trainingset)
-    }, 0)
+    #writer.add_scalars('Test/recall_macro', {
+    #    'last activation average recall' : recall_macro_aa.compute(),
+    #    'start maximum activation average recall' : recall_macro_sma.compute(),
+    #    'gaussian support average recall' : recall_macro_gs.compute() 
+    #}, 0)
 
-    writer.add_scalars('Test/f1', {
+
+    writer.add_scalars('Test/f1_micro', {
         'last activation f1' : f1_score_micro_aa,
         'start maximum activation f1' : f1_score_micro_sma,
         'gaussian support f1' : f1_score_micro_gs 
     }, 0)
 
-    #writer.add_scalar('Test/size_loss', l1_loss_size.item(), 0)#epoch * len(train_loader) + fold)
-    #writer.add_scalar('Test/heatmap_loss', heatmap_loss.item(), 0)#epoch * len(train_loader) + fold)
-    #writer.add_scalar('Test/offset_loss', l1_loss_offset.item(),0)# epoch * len(train_loader) + fold)          
-    #writer.add_scalar('Test/total_loss', total_loss.item(), 0)# epoch * len(train_loader) + fold) #item()
+    #writer.add_scalars('Test/f1_macro', {
+    #    'last activation f1' : f1_score_macro_aa,
+    #    'start maximum activation f1' : f1_score_macro_sma,
+    #    'gaussian support f1' : f1_score_macro_gs 
+    #}, 0)
+
+    writer.add_scalars('Test/precision_micro', {
+        'last activation precision micro' : precision_aa_micro,
+        'start maximum activation precision micro' : precision_gs_micro,
+        'gaussian support precision micro' : precision_gs_micro 
+    }, 0)
+
+    #writer.add_scalars('Test/precision_macro', {
+    #    'last activation precision macro' : precision_aa_macro,
+    #    'start maximum activation precision macro' : precision_gs_macro,
+    #    'gaussian support precision macro' : precision_gs_macro 
+    #}, 0)
+
+    writer.add_scalar('Test/size_loss', l1_loss_size.item(), 0)#epoch * len(train_loader) + fold)
+    writer.add_scalar('Test/heatmap_loss', heatmap_loss.item(), 0)#epoch * len(train_loader) + fold)
+    writer.add_scalar('Test/offset_loss', l1_loss_offset.item(),0)# epoch * len(train_loader) + fold)          
+    writer.add_scalar('Test/total_loss', total_loss.item(), 0)# epoch * len(train_loader) + fold) #item()
 
 writer.close()
+
 
