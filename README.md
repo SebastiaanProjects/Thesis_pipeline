@@ -1,6 +1,5 @@
 # Thesis_pipeline
 
-```markdown
 # My Project
 For this project my aim is to combine CenterNet and Masked autoencoders pretraining in object recognition on a timeseries dataset.
 
@@ -37,3 +36,4 @@ MAE_utils                       utility functions for pretraining with Masked Au
 original_pipeline_no_pretrain   script for running CenterNet without MAE-pretraining
 pipeline_with_pretraining       script for running CenterNet in combination with MAE pretraining
 pre_train.py                    script for running the Masked Autoencoders and creating the pretrained encoder
+

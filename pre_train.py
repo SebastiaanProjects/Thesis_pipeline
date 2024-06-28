@@ -34,7 +34,7 @@ for epoch in range(1):
     errors = []            
     for tensor_200hz in pre_train_tensors_list:
         tensor_200hz = tensor_200hz#.to(device)
-        masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.5)
+        masked_segments, binary_mask, original_segments = partition_and_mask(tensor_200hz,segment_size=10,mask_percentage=0.6)
         masked_segments = masked_segments.to(torch.float32)#.to(device)#.float()
         original_segments = original_segments.to(torch.float32)#.to(device)#.float()
         

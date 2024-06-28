@@ -6,7 +6,7 @@ import seaborn as sns
 import torch.nn.init as init
 import pandas as pd
 import torch.nn as nn
-from data_composer import labels_for_refrence, sequence_length, num_classes
+from data_composer import  sequence_length, num_classes, labels_for_refrence
 from sklearn.metrics import confusion_matrix
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -39,7 +39,7 @@ class TimeSeriesCenterNet(nn.Module):
         self.detection_head = CenterNet1DHead(encoder.embed_dim, num_classes, downsampling_factor, sequence_length)#.to(device) #used to be just one detection head, so might differ now that there 's three classes. 
 
     def forward(self, x, mask, downsample_factor): #mask is not used for CenterNet but it is for the encoder
-        encoded_features = self.encoder(x,mask)#.to(device),mask.to(device))
+        encoded_features = self.encoder(x,mask)#.to(device)#,mask.to(device)
         heatmap, size, offset = self.detection_head(encoded_features)
         return heatmap, size, offset
     
@@ -75,10 +75,6 @@ class CenterNet1DHead(nn.Module):
         self.heatmap_head = HeatmapHead(input_dim, num_classes,downsample_factor=downsampling_factor)
         self.sizemap_head = SizeHead(input_dim, downsample_factor=downsampling_factor, maximum_duration=maximum_duration)
         self.offset_head = OffsetHead(input_dim, downsample_factor=downsampling_factor)
-
-        #self.heatmap_head = nn.Conv1d(input_dim, num_classes, kernel_size=3, padding=1) #in image CenterNet all the 8 neighbours are compared, in a 1d series this translates to 3 neighbours
-        #self.size_head = nn.Conv1d(input_dim, 1, kernel_size=3, padding=1) 
-        #self.offset_head = nn.Conv1d(input_dim, 1, kernel_size=3, padding=1)
 
     def forward(self, features):
         features = features.permute(0,2,1) # Permute to shape (batch_size, input_dim, seq_len)
@@ -404,8 +400,8 @@ def focal_loss_weight_tensor(list_of_behaviour):
 
     weights = {label: 1/np.sqrt(count) for label, count in occurences.items()} # weights as inverse of the square root of class frequencies
     total_weight = sum(weights.values())
-    weights = {label: (weight / total_weight) **0.5 for label, weight in weights.items()} # make all the weights sum to 1, but normalized extra by adding **0.5. And doing value for heatmap loss by somthing between 2 and 10.. 
-
+    weights = {label: (weight / total_weight)**0.5 for label, weight in weights.items()} # make all the weights sum to 1, but normalized extra by adding **0.5. And doing value for heatmap loss by somthing between 2 and 10.. 
+    #                                       **0.5
 
     label_to_index = {label: idx for idx, label in enumerate(sorted(occurences.keys()))} # make the mapping from label to index
     weight_tensor = torch.zeros(len(label_to_index), dtype=torch.float32)#, device=device)
@@ -416,7 +412,7 @@ def focal_loss_weight_tensor(list_of_behaviour):
 
     return weight_tensor * num_classes **0.5
 
-print(focal_loss_weight_tensor(labels_for_refrence))
+#print(focal_loss_weight_tensor(labels_for_refrence))
 #                                                            #gamma used to be four there will be an error here, run cell 5&6 and then this again
 def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, gamma=4,weight_tensor=labels_for_refrence, class_weights_activated=False, device=False):
     """
@@ -448,11 +444,11 @@ def manual_loss_v2(prediction_tensor, target_tensor, alpha=2, gamma=4,weight_ten
         neg_loss = -((1 - target_tensor) ** gamma) * (prediction_tensor ** alpha) * torch.log(1 - prediction_tensor + epsilon)
         neg_loss = neg_loss * neg_inds
     else:
-        pos_inds = target_tensor.eq(1).to(device)
+        pos_inds = target_tensor.eq(1)#.to(device)
         pos_inds = pos_inds.float() 
-        neg_inds = target_tensor.lt(1).to(device)
+        neg_inds = target_tensor.lt(1)#.to(device)
         neg_inds = neg_inds.float()
-        weights = focal_loss_weight_tensor(weight_tensor).to(device)
+        weights = focal_loss_weight_tensor(weight_tensor)#.to(device)
 
         pos_loss = -((1 - prediction_tensor) ** alpha) * torch.log(prediction_tensor + epsilon)
         pos_loss = pos_loss.to(device)
@@ -659,6 +655,9 @@ def neighbouring_peaks_sort(extracted_peaks): #3 as relative difference
     Returns:
     - list of tuples: Chosen peaks with highest activations, ensuring no two adjacent peaks of the same class.
     """
+    if not extracted_peaks:
+        return []
+
     sorted_peaks_by_position = sorted(extracted_peaks, key=lambda peak: peak[1])
     chosen_peaks = []
     position_tracker = sorted_peaks_by_position[0][1] # Starting position
@@ -798,13 +797,16 @@ def reconstruct_timelines_ascending_activation(peaks, original_length): #now hig
      #
     timelines=[]
     for batch_nr in range(len(peaks)): #w/o len
-        timeline = torch.zeros(original_length, dtype=int)#, device=device)
-        for class_idx, pos, activation, size, offset in peaks[batch_nr]:
-            start = int(pos + offset - size / 2)
-            end = int(pos + offset + size / 2)
-            start = max(0, start)
-            end = min(original_length, end)
-            timeline[start:end] = class_idx 
+        if peaks[batch_nr]:
+            timeline = torch.zeros(original_length, dtype=int)#, device=device)
+            for class_idx, pos, activation, size, offset in peaks[batch_nr]:
+                start = int(pos + offset - size / 2)
+                end = int(pos + offset + size / 2)
+                start = max(0, start)
+                end = min(original_length, end)
+                timeline[start:end] = class_idx 
+        if not peaks[batch_nr]:
+            timeline = torch.zeros(original_length, dtype=int)
         timelines.append(timeline)
     
     combined_timelines = torch.stack(timelines, dim=0)
@@ -892,17 +894,19 @@ def reconstruct_timelines_gaussian_support(peaks, original_length):
     """
     timelines = []
     for batch_nr in range(len(peaks)):  # Process each batch separately
-        position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
-        timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
-        class_conversion = {} #from order back to class_nrs
-        gaussian_smoothed_maps = []
-        for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
-            class_conversion[index] = class_index
-            gaussian_smoothed_maps.append(create_smooth_gaussian_kernel(sequence_length=sequence_length, peak_position= pos+offset, activation_peak=activation, size= size, widefactor=4))
-        
-        gaussummary = torch.stack(gaussian_smoothed_maps, dim=0)
-        timeline = torch.argmax(gaussummary, dim=0)
-        timeline = torch.tensor([class_conversion[int(item)] for item in timeline])#, device=device)
+        if peaks[batch_nr]:
+            position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
+            timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
+            class_conversion = {} #from order back to class_nrs
+            gaussian_smoothed_maps = []
+            for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
+                class_conversion[index] = class_index
+                gaussian_smoothed_maps.append(create_smooth_gaussian_kernel(sequence_length=original_length, peak_position= pos+offset, activation_peak=activation, size= size, widefactor=4))
+            gaussummary = torch.stack(gaussian_smoothed_maps, dim=0)
+            timeline = torch.argmax(gaussummary, dim=0)
+            timeline = torch.tensor([class_conversion[int(item)] for item in timeline])#, device=device)
+        if not peaks[batch_nr]:
+            timeline = torch.zeros(original_length, dtype=int)
         timelines.append(timeline)
     
     combined_timelines = torch.stack(timelines, dim=0)
@@ -946,26 +950,28 @@ def reconstruct_timelines_start_max_activation(peaks, original_length):
     """
     timelines = []
     for batch_nr in range(len(peaks)):  # Process each batch separately
-        position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
-        timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
+        if peaks[batch_nr]:
+            position_based_order = sorted(peaks[batch_nr], key=lambda x: x[1])  # Sort by position
+            timeline = torch.zeros(original_length, dtype=int)#, device=device)  # Initialize the timeline with zeros
 
-        for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
-            start = int(pos + offset - size / 2)
-            end = int(pos + offset + size / 2)
-            start = max(0, start)
-            end = min(original_length, end)
+            for index, (class_index, pos, activation, size, offset) in enumerate(position_based_order):
+                start = int(pos + offset - size / 2)
+                end = int(pos + offset + size / 2)
+                start = max(0, start)
+                end = min(original_length, end)
 
-            # Check for overlap with the next detection, if it exists
-            if index < len(position_based_order) - 1:
-                (next_class_index, next_pos, next_activation, next_size, next_offset) = position_based_order[index + 1]
-                next_start = int(next_pos + next_offset - next_size / 2)
-                
-                if next_start < end:  # There is an overlap
-                    if next_activation > activation:
-                        end = next_start  # Cut the current range to avoid overlap
-                        
-            timeline[start:end] = class_index  # Assign the class index to the range
-        
+                # Check for overlap with the next detection, if it exists
+                if index < len(position_based_order) - 1:
+                    (next_class_index, next_pos, next_activation, next_size, next_offset) = position_based_order[index + 1]
+                    next_start = int(next_pos + next_offset - next_size / 2)
+                    
+                    if next_start < end:  # There is an overlap
+                        if next_activation > activation:
+                            end = next_start  # Cut the current range to avoid overlap
+                            
+                timeline[start:end] = class_index  # Assign the class index to the range
+        if not peaks[batch_nr]:
+            timeline = torch.zeros(original_length, dtype=int)
         timelines.append(timeline)
     
     combined_timelines = torch.stack(timelines, dim=0)
@@ -1013,3 +1019,29 @@ def plot_bar_chart(values_dict, metric_name, writer, global_step, num_classes, t
 
     # Log the figure to TensorBoard
     writer.add_figure(f'{test_train_val}/{metric_name} by Class', fig, global_step)
+
+
+def save_model(model, optimizer, epoch=0, mskpct=0, path=f"model_pretrained_20Hz_.pth"): #old name = "model_pretrained.pth" for 200 hz crabplover,
+    torch.save({
+        f'model_state_dict_20Hz_with_{epoch}_epochs_mskpct_{mskpct}': model.state_dict(),#               another oldname: "model_pretrained_20Hz.pth" for right snippit, but pretrained with 1 epoch and a masking percentage of 0.6
+        f'optimizer_state_dict_20Hz_with_{epoch}_epochs_mskpct_{mskpct}': optimizer.state_dict(),
+        # You can also save more metadata if needed.
+    }, path)
+
+def load_model(model, optimizer, epoch, mskpct, path=f"model_pretrained_20Hz_.pth"):
+    checkpoint = torch.load(path)
+    modelstring = f"model_state_dict_20Hz_with_{epoch}_epochs_mskpct_{mskpct}"
+    optimizerstring = f"optimizer_state_dict_20Hz_with_{epoch}_epochs_mskpct_{mskpct}"
+    model.load_state_dict(checkpoint[modelstring])
+    optimizer.load_state_dict(checkpoint[optimizerstring])
+    return model, optimizer
+
+def check_for_nans(tensor, tensor_name):
+    if torch.isnan(tensor).any():
+        print(f"NaN detected in {tensor_name}")
+        raise ValueError(f"NaN detected in {tensor_name}")
+
+    if torch.isinf(tensor).any():
+        print(f"Inf detected in {tensor_name}")
+        raise ValueError(f"Inf detected in {tensor_name}")
+    

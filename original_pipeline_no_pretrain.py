@@ -29,7 +29,6 @@ writer = SummaryWriter()
 
 
 size_contribution, offset_contribution, downsample_factor = 0.2, 1, 4
-
 untrained_encoder = TimeSeriesMAEEncoder(segment_dim=4, embed_dim=64, num_heads=16, num_layers=4, dropout_rate=0.1)
 
 
@@ -61,7 +60,7 @@ for fold, (train_ids, test_ids) in enumerate(kfold.split(trainingset)): #trainin
         total_predictions_sma = []
         total_predictions_gs = []
         total_labels = []
-        for features, labels , durations, keypoints, labels_list in train_loader:          
+        for features, labels , durations, keypoints, labels_list in train_loader:  
             optimizer.zero_grad()
             heatmap_target = generate_heatmaps(sequence_length=sequence_length, batch_size=train_loader.batch_size, keypoints_batch= keypoints, classes_batch= labels_list, num_classes=num_classes, durations_batch= durations, downsample_factor=4)
             sizemap_target = generate_size_maps(sequence_length=sequence_length ,batch_size=train_loader.batch_size, keypoints_batch=keypoints, durations_batch= durations, downsample_factor=4)

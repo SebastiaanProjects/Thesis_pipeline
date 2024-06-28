@@ -227,7 +227,6 @@ def prepare_behaviour_data_duration(original_features, original_labelling, downs
 
 def most_logical_fold(trainingsetsize):
     #usually the number of folds. between 5 or 10 is most preferable, see what's closest to that interval
-    divide_options = []
     for i in np.arange(1, trainingsetsize):
         if trainingsetsize%i ==0:
             if i <= 15 and i > 5:

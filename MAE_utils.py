@@ -1,8 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.utils as nn_utils
 import torch.optim as optim
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+import datetime
+import numpy as np
 
 class TimeSeriesMAEEncoder(nn.Module):
     """
@@ -39,7 +42,7 @@ class TimeSeriesMAEEncoder(nn.Module):
                 torch.Tensor: The encoded output from the Transformer encoder stack, preserving
                               the sequence length but with features transformed into the embedding dimension.
     """
-    def __init__(self, segment_dim, embed_dim, num_heads, num_layers, dropout_rate): #dropout_rate is for robustness, different than masked encoding done here
+    def __init__(self, segment_dim, embed_dim, num_heads, num_layers, dropout_rate,sequence_length=200): #dropout_rate is for robustness, different than masked encoding done here
         super(TimeSeriesMAEEncoder, self).__init__() #segment_dimension is the amount of values in one datapoint, three in this case
         #embed_dimension is the hyperparameter stating how complex the data can be scoped out 
         #num_heads is the amount of different parts of the input that can be attended to, to caputure a richer set of dependencies. The embed_dimensions should be divisible by num_heads. 
@@ -48,8 +51,9 @@ class TimeSeriesMAEEncoder(nn.Module):
         self.embed_dim = embed_dim  # Dimension of the embedding space
         
         self.linear_proj = nn.Linear(segment_dim, embed_dim)#.to(device) #in a linear way changes the 4value segment dimension into the chosen embedded dimension increasing complexity of the data
-        self.positional_embeddings = nn.Parameter(torch.randn(1, 200, embed_dim))#.to(device) #creating positional embedding as a training parameter for the nerual network which is important for the effectiveness of the transformer model in processing sequences where the order of elements is important
-
+        #when the data for the positional_embeddings are done for the seaguls change the nn.Parameter(torch.randn(1,20,embed_dim))
+        #self.positional_embeddings = nn.Parameter(torch.randn(1, 200, embed_dim))#.to(device) #creating positional embedding as a training parameter for the nerual network which is important for the effectiveness of the transformer model in processing sequences where the order of elements is important
+        self.positional_embeddings = nn.Parameter(torch.randn(1,sequence_length, embed_dim))
         encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads, dropout=dropout_rate,batch_first=True)#.to(device) #initializing the encoder
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)#.to(device)
 
@@ -57,12 +61,31 @@ class TimeSeriesMAEEncoder(nn.Module):
         # x is the input segments of shape [batch_size, seq_len, segment_dim]
         x = x.float()  # Make sure input data is float
         #x = x.to(device)
+        #print(f"Input data statistics - min: {x.min().item()}, max: {x.max().item()}, mean: {x.mean().item()}, std: {x.std().item()}")
+        #print(f"Initial weights - min: {self.linear_proj.weight.min().item()}, max: {self.linear_proj.weight.max().item()}")
+        #print(f"Initial biases - min: {self.linear_proj.bias.min().item()}, max: {self.linear_proj.bias.max().item()}")
+        if torch.isnan(x).any():
+            print("NaN detected in input data")
+
+        bias = self.linear_proj.bias.data
+        weights = self.linear_proj.weight.data
+        moment = datetime.datetime.now().strftime("%H-%M-%S")
+        #np.savetxt(f"test_output/bias_{moment}", bias.detach().cpu().numpy())
+        #np.savetxt(f"test_output/weight_{moment}", weights.detach().cpu().numpy())
+
         x_projected = self.linear_proj(x) #apply the earlier created lineair_projection
+
+        if torch.isnan(x_projected).any():
+            print("NaN detected in linear projection")
+        bias = self.linear_proj.bias.data
+        weights = self.linear_proj.weight.data
 
         # Create positional embeddings for each data point in the batch
         # (batch_size, seq_len, embed_dim)
         seq_len = x.size(1)
         positional_embeddings = self.positional_embeddings[:, :seq_len, :]
+        if torch.isnan(positional_embeddings).any():
+            print("NaN detected in positional_embeddings")
 
         # Add positional embeddings to the linearly projected data
         x_projected += positional_embeddings
@@ -135,3 +158,34 @@ class TimeSeriesMAEDecoder(nn.Module):
         decoded_output = self.output_proj(decoded_output)
         
         return decoded_output
+
+
+def clip_and_threshold_gradients(parameters, clip_value=1.0, min_value=1e-10):
+    """
+    Clips gradients by their norm and thresholds gradients to avoid very small values.
+    
+    Args:
+        parameters (Iterable[torch.Tensor]): Model parameters.
+        clip_value (float): Maximum allowed norm for gradients.
+        min_value (float): Minimum allowed value for gradient magnitudes.
+    """
+    for param in parameters:
+        if param.grad is not None:
+            # Clip gradients by their norm
+            nn_utils.clip_grad_norm_([param], max_norm=clip_value)
+            # Ensure gradient magnitudes are above the min_value
+            grad_data = param.grad.data
+            small_grad_mask = torch.abs(grad_data) < min_value
+            grad_data[small_grad_mask] = torch.sign(grad_data[small_grad_mask]) * min_value
+            param.grad.data = grad_data
+
+class ClipConstraint():
+    """
+    Clips tensor values
+    """
+    def __init__(self, clip_value: float) -> None:
+        self.clip_value = clip_value
+
+    def __call__(self, model) -> torch.Any:
+        for p in model.parameters():
+            p.data.clamp_(-self.clip_value, self.clip_value)
