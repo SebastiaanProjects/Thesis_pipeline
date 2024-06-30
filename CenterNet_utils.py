@@ -570,7 +570,7 @@ def non_maximum_suppression_1d(heatmap, window_size=9):
 
 def adaptive_peak_extraction(heatmap, window_size=9, prominence_factor=0.75): #window = 9, 
     """
-    Extract peaks from a 2D heatmap using adaptive thresholding.
+    Extract peaks from a 1D heatmap using adaptive thresholding.
     
     Args:
     - heatmap (torch.Tensor): 2D tensor representing the heatmap with shape (num_classes, sequence_length).

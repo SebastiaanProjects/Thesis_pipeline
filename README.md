@@ -36,4 +36,4 @@ MAE_utils                       utility functions for pretraining with Masked Au
 original_pipeline_no_pretrain   script for running CenterNet without MAE-pretraining
 pipeline_with_pretraining       script for running CenterNet in combination with MAE pretraining
 pre_train.py                    script for running the Masked Autoencoders and creating the pretrained encoder
-
+Seagull.CenterNet.py            script for tunning the entire gull pipeline. The pretaining is snipped into segments of the gulls data. Resulting in a fair comparison
